@@ -27,6 +27,7 @@ FROM php:8.2-fpm-alpine AS php-base
 WORKDIR /var/www/html
 
 RUN apk add --no-cache \
+        $PHPIZE_DEPS \
         bash \
         fcgi \
         freetype-dev \
