@@ -1,0 +1,100 @@
+:root {
+            --primary: #007342;
+            --secondary: #9FC210;
+        }
+
+        body {
+            background: linear-gradient(135deg, #007342 0%, #9FC210 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, sans-serif;
+            padding: 20px 0;
+        }
+
+        .form-container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+            overflow: hidden
+        }
+
+        .form-header {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: #fff;
+            padding: 24px;
+            text-align: center
+        }
+
+        .form-logo {
+            width: 300px;
+            max-width: 100%;
+            margin-bottom: 12px;
+        }
+
+        .form-body {
+            padding: 28px
+        }
+
+        .required::after {
+            content: ' *';
+            color: #ef4444
+        }
+
+        .file-upload-area {
+            border: 2px dashed var(--primary);
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            background: #f6fbf8
+        }
+
+        .app-navbar {
+            background: linear-gradient(135deg, #007342 0%, #9FC210 100%) !important;
+        }
+
+        .file-preview {
+            margin-top: 10px;
+            display: none;
+        }
+
+        .file-preview.show {
+            display: block
+        }
+
+        .checkbox-group {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 12px
+        }
+
+        .alert-error {
+            display: none
+        }
+
+        .spinner-container {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.45);
+            align-items: center;
+            justify-content: center;
+            z-index: 9999
+        }
+
+        .spinner-container.show {
+            display: flex
+        }
+
+        .spinner {
+            width: 48px;
+            height: 48px;
+            border: 6px solid #fff;
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg)
+            }
+        }
