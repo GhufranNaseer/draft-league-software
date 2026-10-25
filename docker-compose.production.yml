@@ -1,0 +1,144 @@
+name: drafting
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app
+      args:
+        VITE_APP_NAME: "${APP_NAME:-Drafting}"
+        VITE_REVERB_APP_KEY: "${REVERB_APP_KEY:?Set REVERB_APP_KEY in .env.production}"
+        VITE_REVERB_HOST: "${APP_DOMAIN:-drafting.itinnovativeexperts.com}"
+        VITE_REVERB_PORT: "${VITE_REVERB_PORT:-443}"
+        VITE_REVERB_SCHEME: "${VITE_REVERB_SCHEME:-https}"
+    image: drafting-app:latest
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      RUN_MIGRATIONS: "true"
+      APP_KEY: "${APP_KEY:?Set APP_KEY in .env.production}"
+      REVERB_APP_SECRET: "${REVERB_APP_SECRET:?Set REVERB_APP_SECRET in .env.production}"
+    volumes:
+      - app-storage:/var/www/html/storage
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - app_net
+    healthcheck:
+      test: ["CMD-SHELL", "SCRIPT_NAME=/ping SCRIPT_FILENAME=/ping REQUEST_METHOD=GET cgi-fcgi -bind -connect 127.0.0.1:9000 | grep -q pong"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+
+  queue:
+    image: drafting-app:latest
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      RUN_MIGRATIONS: "false"
+    command: ["php", "artisan", "queue:work", "--queue=${BROADCAST_QUEUE:-broadcasts},default", "--sleep=1", "--tries=3", "--timeout=60", "--no-interaction"]
+    stop_grace_period: 90s
+    volumes:
+      - app-storage:/var/www/html/storage
+    depends_on:
+      app:
+        condition: service_healthy
+      reverb:
+        condition: service_healthy
+    networks:
+      - app_net
+
+  reverb:
+    image: drafting-app:latest
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      RUN_MIGRATIONS: "false"
+    command: ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8080"]
+    volumes:
+      - app-storage:/var/www/html/storage
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - app_net
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@fsockopen('127.0.0.1', 8080) ? 0 : 1);"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+      args:
+        VITE_APP_NAME: "${APP_NAME:-Drafting}"
+        VITE_REVERB_APP_KEY: "${REVERB_APP_KEY:?Set REVERB_APP_KEY in .env.production}"
+        VITE_REVERB_HOST: "${APP_DOMAIN:-drafting.itinnovativeexperts.com}"
+        VITE_REVERB_PORT: "${VITE_REVERB_PORT:-443}"
+        VITE_REVERB_SCHEME: "${VITE_REVERB_SCHEME:-https}"
+    image: drafting-web:latest
+    restart: unless-stopped
+    expose:
+      - "80"
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik_proxy
+      - traefik.http.routers.drafting-http.rule=Host(`${APP_DOMAIN:-drafting.itinnovativeexperts.com}`)
+      - traefik.http.routers.drafting-http.entrypoints=web
+      - traefik.http.routers.drafting-http.middlewares=drafting-https-redirect
+      - traefik.http.routers.drafting-http.service=drafting
+      - traefik.http.middlewares.drafting-https-redirect.redirectscheme.scheme=https
+      - traefik.http.routers.drafting.rule=Host(`${APP_DOMAIN:-drafting.itinnovativeexperts.com}`)
+      - traefik.http.routers.drafting.entrypoints=${TRAEFIK_ENTRYPOINTS:-websecure}
+      - traefik.http.routers.drafting.tls=true
+      - traefik.http.routers.drafting.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      - traefik.http.routers.drafting.service=drafting
+      - traefik.http.services.drafting.loadbalancer.server.port=80
+    volumes:
+      - app-storage:/var/www/html/storage:ro
+    depends_on:
+      app:
+        condition: service_healthy
+      reverb:
+        condition: service_healthy
+    networks:
+      - app_net
+      - traefik_proxy
+
+  database:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: "${DB_DATABASE:-drafting}"
+      MARIADB_USER: "${DB_USERNAME:-drafting}"
+      MARIADB_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD in .env.production}"
+      MARIADB_ROOT_PASSWORD: "${DB_ROOT_PASSWORD:?Set DB_ROOT_PASSWORD in .env.production}"
+    volumes:
+      - database-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app_net
+
+volumes:
+  app-storage:
+  database-data:
+
+networks:
+  app_net:
+    driver: bridge
+  traefik_proxy:
+    external: true
