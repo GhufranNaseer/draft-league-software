@@ -45,6 +45,13 @@ rollback() {
     if [ -n "$PREV_COMMIT" ]; then
         log_warn "Restoring previous Git commit: $PREV_COMMIT"
         git reset --hard "$PREV_COMMIT" || true
+
+        if [ -d "$BACKUP_BASE_DIR/build_pre_deploy_${TIMESTAMP}" ]; then
+            log_warn "Restoring previous frontend build assets..."
+            rm -rf public/build
+            cp -a "$BACKUP_BASE_DIR/build_pre_deploy_${TIMESTAMP}" public/build
+        fi
+
         log_warn "Re-clearing caches..."
         docker exec "$APP_CONTAINER" php artisan optimize:clear || true
         docker restart "$QUEUE_CONTAINER" "$REVERB_CONTAINER" "$APP_CONTAINER" || true
@@ -127,6 +134,21 @@ if [ "$TARGET_COMMIT" = "HEAD" ] || [ "$TARGET_COMMIT" = "origin/main" ]; then
     RESOLVED_COMMIT=$(git rev-parse origin/main)
 else
     RESOLVED_COMMIT=$(git rev-parse "$TARGET_COMMIT")
+fi
+
+# Security check: Ensure the release commit belongs to the main branch history
+if [ "$RESOLVED_COMMIT" != "$(git rev-parse origin/main)" ]; then
+    if ! git merge-base --is-ancestor "$RESOLVED_COMMIT" origin/main; then
+        log_error "Security Error: Target commit $RESOLVED_COMMIT is not an ancestor of origin/main! Refusing to deploy unreviewed code."
+        exit 1
+    fi
+fi
+
+# Backup active frontend assets before switching code
+if [ -d "public/build" ]; then
+    log_info "Backing up active frontend build assets..."
+    rm -rf "$BACKUP_BASE_DIR/build_pre_deploy_${TIMESTAMP}"
+    cp -a public/build "$BACKUP_BASE_DIR/build_pre_deploy_${TIMESTAMP}"
 fi
 
 log_info "Checking out release commit: $RESOLVED_COMMIT"

@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       target_commit:
-        description: 'Specific commit SHA to deploy (leave blank for latest HEAD)'
+        description: 'Specific commit SHA to deploy (must belong to main, leave blank for latest HEAD)'
         required: false
         default: ''
 
@@ -19,8 +19,41 @@ permissions:
   contents: read
 
 jobs:
+  verify-release:
+    name: Verify Release Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: bcmath, exif, gd, intl, mbstring, opcache, pcntl, pdo_mysql, pdo_sqlite, zip, redis
+          coverage: none
+
+      - name: Cache Composer Dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache/files
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: ${{ runner.os }}-composer-
+
+      - name: Install Dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Run Pint Code Style Check
+        run: vendor/bin/pint --test
+
+      - name: Run Test Suite
+        run: |
+          php artisan key:generate --env=testing
+          php artisan test --compact
+
   build-and-deploy:
     name: Build Assets & Deploy to VPS
+    needs: [verify-release]
     runs-on: ubuntu-latest
     environment: production
     steps:
