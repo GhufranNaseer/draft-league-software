@@ -1,0 +1,82 @@
+name: Deploy Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      target_commit:
+        description: 'Specific commit SHA to deploy (leave blank for latest HEAD)'
+        required: false
+        default: ''
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-deploy:
+    name: Build Assets & Deploy to VPS
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install NPM Dependencies
+        run: npm ci
+
+      - name: Build Production Frontend Assets
+        run: npm run build
+
+      - name: Verify Manifest & Assets
+        run: |
+          test -f public/build/manifest.json || { echo "Missing manifest.json"; exit 1; }
+          test -d public/build/assets || { echo "Missing public/build/assets"; exit 1; }
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.VPS_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      - name: Sync Frontend Build Assets to VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_PORT: ${{ secrets.VPS_PORT || '22' }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          echo "Syncing public/build/ to VPS..."
+          rsync -avz --delete -e "ssh -i ~/.ssh/deploy_key -p $VPS_PORT -o StrictHostKeyChecking=yes" \
+            public/build/ \
+            $VPS_USER@$VPS_HOST:/var/www/drafting_v2/public/build/
+
+      - name: Execute Production Deployment Script
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_PORT: ${{ secrets.VPS_PORT || '22' }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          DEPLOY_COMMIT: ${{ github.event.inputs.target_commit || github.sha }}
+        run: |
+          echo "Executing deployment on $VPS_HOST for commit $DEPLOY_COMMIT..."
+          ssh -i ~/.ssh/deploy_key -p $VPS_PORT -o StrictHostKeyChecking=yes \
+            $VPS_USER@$VPS_HOST "bash /var/www/drafting_v2/scripts/deploy-production.sh $DEPLOY_COMMIT"
+
+      - name: Cleanup SSH Keys
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
