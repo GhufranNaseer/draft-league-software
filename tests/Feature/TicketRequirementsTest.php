@@ -2,6 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Events\DraftTurnChanged;
+use App\Livewire\DraftBoard;
+use App\Livewire\TeamDraftDashboard;
 use App\Models\Category;
 use App\Models\DraftPick;
 use App\Models\DraftRound;
@@ -201,7 +204,7 @@ class TicketRequirementsTest extends TestCase
 
         // Livewire Pause action must succeed without HTTP 500 even when WebSocket server is offline
         Livewire::actingAs($admin)
-            ->test(\App\Livewire\DraftBoard::class, ['leagueType' => 'male'])
+            ->test(DraftBoard::class, ['leagueType' => 'male'])
             ->call('pauseRound', $round->id)
             ->assertOk();
 
@@ -213,7 +216,7 @@ class TicketRequirementsTest extends TestCase
 
         // Resume action must succeed without HTTP 500
         Livewire::actingAs($admin)
-            ->test(\App\Livewire\DraftBoard::class, ['leagueType' => 'male'])
+            ->test(DraftBoard::class, ['leagueType' => 'male'])
             ->call('resumeRound', $round->id)
             ->assertOk();
 
@@ -282,7 +285,7 @@ class TicketRequirementsTest extends TestCase
 
         // Render Livewire component
         $component = Livewire::actingAs($teamUser)
-            ->test(\App\Livewire\TeamDraftDashboard::class, ['teamId' => $team->id]);
+            ->test(TeamDraftDashboard::class, ['teamId' => $team->id]);
 
         // CNIC image path must NOT appear in the rendered HTML
         $component->assertDontSee('ids/cnic_card_secret.jpg');
@@ -320,7 +323,7 @@ class TicketRequirementsTest extends TestCase
         ]);
 
         $componentAfter = Livewire::actingAs($teamUser)
-            ->test(\App\Livewire\TeamDraftDashboard::class, ['teamId' => $team->id]);
+            ->test(TeamDraftDashboard::class, ['teamId' => $team->id]);
 
         // Bilal's passport picture must be rendered, but NOT his CNIC
         $componentAfter->assertSee('passports/bilal_passport.jpg');
@@ -504,7 +507,7 @@ class TicketRequirementsTest extends TestCase
 
         // Livewire pollActiveRound on DraftBoard
         Livewire::actingAs($admin)
-            ->test(\App\Livewire\DraftBoard::class, ['leagueType' => 'male'])
+            ->test(DraftBoard::class, ['leagueType' => 'male'])
             ->call('pollActiveRound')
             ->assertOk();
 
@@ -518,7 +521,7 @@ class TicketRequirementsTest extends TestCase
 
         // Livewire pollActiveRound on TeamDraftDashboard
         Livewire::actingAs($admin)
-            ->test(\App\Livewire\TeamDraftDashboard::class, ['teamId' => $team1->id])
+            ->test(TeamDraftDashboard::class, ['teamId' => $team1->id])
             ->call('pollActiveRound')
             ->assertOk();
 
@@ -553,7 +556,7 @@ class TicketRequirementsTest extends TestCase
             'remaining_turn_seconds' => 85,
         ]);
 
-        $event = new \App\Events\DraftTurnChanged($round, 'Timer state updated.');
+        $event = new DraftTurnChanged($round, 'Timer state updated.');
         $payload = $event->broadcastWith();
 
         $this->assertEquals($round->id, $payload['roundId']);
@@ -621,7 +624,7 @@ class TicketRequirementsTest extends TestCase
             'is_paused' => false,
         ]);
 
-        $event1 = new \App\Events\DraftTurnChanged($round);
+        $event1 = new DraftTurnChanged($round);
         $payload1 = $event1->broadcastWith();
         $this->assertLessThanOrEqual(20, $payload1['remainingTurnSeconds']);
         $this->assertGreaterThanOrEqual(19, $payload1['remainingTurnSeconds']);
@@ -629,7 +632,7 @@ class TicketRequirementsTest extends TestCase
         // Advance simulated time by 5 seconds
         Carbon::setTestNow(Carbon::now()->addSeconds(5));
 
-        $event2 = new \App\Events\DraftTurnChanged($round);
+        $event2 = new DraftTurnChanged($round);
         $payload2 = $event2->broadcastWith();
         $this->assertLessThanOrEqual(15, $payload2['remainingTurnSeconds']);
         $this->assertLessThan($payload1['remainingTurnSeconds'], $payload2['remainingTurnSeconds']);
@@ -645,7 +648,7 @@ class TicketRequirementsTest extends TestCase
         $team = Team::query()->create(['name' => 'Team Blade', 'email' => 'blade@example.com', 'league_type' => 'male', 'max_players' => 5]);
 
         $draftBoardHtml = Livewire::actingAs($admin)
-            ->test(\App\Livewire\DraftBoard::class, ['leagueType' => 'male'])
+            ->test(DraftBoard::class, ['leagueType' => 'male'])
             ->html();
 
         // Must use static x-data="ktplDraftTimerComponent()" to prevent Livewire morphdom evaluation jumps
@@ -653,11 +656,10 @@ class TicketRequirementsTest extends TestCase
         $this->assertStringNotContainsString('x-data="ktplDraftTimerComponent({', $draftBoardHtml);
 
         $teamDashboardHtml = Livewire::actingAs($admin)
-            ->test(\App\Livewire\TeamDraftDashboard::class, ['teamId' => $team->id])
+            ->test(TeamDraftDashboard::class, ['teamId' => $team->id])
             ->html();
 
         $this->assertStringContainsString('x-data="ktplDraftTimerComponent()"', $teamDashboardHtml);
         $this->assertStringNotContainsString('x-data="ktplDraftTimerComponent({', $teamDashboardHtml);
     }
 }
-

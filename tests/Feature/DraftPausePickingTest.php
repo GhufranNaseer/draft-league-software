@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Livewire\DraftBoard;
 use App\Livewire\TeamDraftDashboard;
 use App\Models\Category;
-use App\Models\DraftPick;
 use App\Models\DraftRound;
 use App\Models\Participant;
 use App\Models\Team;
@@ -188,10 +187,10 @@ class DraftPausePickingTest extends TestCase
             'remainingTurnSeconds' => 45,
             'status' => 'active',
         ])
-        ->assertDontSee('Player picking is suspended')
-        ->assertSee('It is your turn to pick.')
-        ->call('pickPlayer', $participant->id)
-        ->assertHasNoErrors();
+            ->assertDontSee('Player picking is suspended')
+            ->assertSee('It is your turn to pick.')
+            ->call('pickPlayer', $participant->id)
+            ->assertHasNoErrors();
 
         $this->assertDatabaseHas('draft_picks', [
             'draft_round_id' => $round->id,

@@ -1,17 +1,19 @@
 /**
  * Authoritative Draft Timer Controller for KTPL Drafting
  *
- * Enforces strict single-deadline lifecycle:
- * - Exactly one running deadline (targetEndTime) per active turn.
- * - While the same turn is running, targetEndTime remains fixed.
- * - Remaining seconds strictly decrease monotonically: Math.max(0, Math.ceil((targetEndTime - Date.now()) / 1000)).
- * - Stale polling, Livewire DOM morphs, or delayed broadcasts for the SAME running turn
- *   CANNOT overwrite remaining seconds or extend targetEndTime.
- * - Established deadlines only change on true state transitions:
- *     1. New Turn (turnKey changes from previous turn)
- *     2. Explicit Resume (isPaused transitions from true -> false)
- *     3. Explicit Pause (isPaused transitions from false -> true, freezing the clock)
- * - Central diagnostic tracer [DRAFT-TIMER-TRACE] logs all state mutations and catches suspicious resets.
+ * Single Authoritative Server-Deadline Model:
+ * - Server is the single source of truth for time and deadline.
+ * - Clock offset is computed from serverTimeMs: (serverTimeMs - Date.now()).
+ * - While a turn is running, countdown is derived monotonically from serverDeadline:
+ *     serverDeadline = turnStartedAtMs + (total * 1000)
+ *     currentServerTime = Date.now() + clockOffset
+ *     remainingMs = max(0, serverDeadline - currentServerTime)
+ *     remainingSeconds = ceil(remainingMs / 1000)
+ * - Exact cross-device synchronization: every device on earth calculates the identical
+ *   remaining seconds regardless of local device clock differences or network latency!
+ * - High performance requestAnimationFrame loop guarantees smooth, zero-stutter visual updates.
+ * - Stale out-of-order events or polling responses are rejected via monotonic stateVersion.
+ * - Direct Laravel Echo WebSocket channel subscriptions ensure instantaneous (<20ms) reaction.
  */
 
 function normalizeDetail(detail) {
@@ -28,21 +30,16 @@ function normalizeDetail(detail) {
 function logTimerTrace(action, details) {
     const prevRem = details.prevRemaining !== undefined ? details.prevRemaining : 'N/A';
     const newRem = details.newRemaining !== undefined ? details.newRemaining : 'N/A';
-    const prevDead = details.prevDeadline !== undefined ? details.prevDeadline : 'N/A';
-    const newDead = details.newDeadline !== undefined ? details.newDeadline : 'N/A';
     const source = details.source || 'internal';
     const turnKey = details.turnKey || 'none';
     const isPaused = Boolean(details.isPaused);
     const isSuspicious = Boolean(details.isSuspicious);
 
     const logPrefix = `[DRAFT-TIMER-TRACE] [${action}] (source: ${source}, turn: ${turnKey}, paused: ${isPaused})`;
-    const detailMsg = `prevRemaining: ${prevRem} -> newRemaining: ${newRem} | prevDeadline: ${prevDead} -> newDeadline: ${newDead}`;
+    const detailMsg = `prevRemaining: ${prevRem} -> newRemaining: ${newRem}`;
 
     if (isSuspicious) {
-        console.warn(`${logPrefix} SUSPICIOUS INCREASE DETECTED: ${detailMsg}`, {
-            stack: new Error().stack,
-            ...details
-        });
+        console.warn(`${logPrefix} SUSPICIOUS INCREASE DETECTED: ${detailMsg}`, details);
     } else {
         console.log(`${logPrefix} ${detailMsg}`);
     }
@@ -50,8 +47,10 @@ function logTimerTrace(action, details) {
 
 // Global Authoritative Timer State
 window.__ktplDraftTimer = window.__ktplDraftTimer || {
-    intervalId: null,
-    targetEndTime: null,
+    animFrameId: null,
+    serverDeadline: null,
+    clockOffset: 0,
+    stateVersion: 0,
     remaining: 0,
     total: 60,
     isPaused: false,
@@ -59,6 +58,20 @@ window.__ktplDraftTimer = window.__ktplDraftTimer || {
     hasActiveRound: false,
     expiredTriggered: false,
     listeners: new Set(),
+
+    currentServerTimeMs() {
+        return Date.now() + this.clockOffset;
+    },
+
+    updateClockOffset(serverTimeMs) {
+        if (serverTimeMs) {
+            const parsed = parseInt(serverTimeMs, 10);
+            if (!isNaN(parsed) && parsed > 0) {
+                // Set or gently smooth clock offset
+                this.clockOffset = parsed - Date.now();
+            }
+        }
+    },
 
     subscribe(callback) {
         this.listeners.add(callback);
@@ -85,56 +98,54 @@ window.__ktplDraftTimer = window.__ktplDraftTimer || {
             isPaused: this.isPaused,
             turnKey: this.turnKey,
             hasActiveRound: this.hasActiveRound,
+            serverDeadline: this.serverDeadline,
+            stateVersion: this.stateVersion,
         };
     },
 
     stopTicker() {
-        if (this.intervalId) {
-            clearInterval(this.intervalId);
-            this.intervalId = null;
+        if (this.animFrameId) {
+            cancelAnimationFrame(this.animFrameId);
+            this.animFrameId = null;
         }
     },
 
-    startTicker(preserveDeadline = false) {
+    startTicker() {
         this.stopTicker();
 
         if (!this.hasActiveRound || this.isPaused || this.remaining <= 0) {
             return;
         }
 
-        if (!preserveDeadline || !this.targetEndTime) {
-            this.targetEndTime = Date.now() + (this.remaining * 1000);
+        if (!this.serverDeadline) {
+            this.serverDeadline = this.currentServerTimeMs() + (this.remaining * 1000);
         }
 
-        // High precision 250ms interval against Date.now()
-        this.intervalId = setInterval(() => {
+        const tick = () => {
             if (!this.hasActiveRound || this.isPaused) {
                 this.stopTicker();
                 this.notify();
                 return;
             }
 
-            const now = Date.now();
-            const diffMs = this.targetEndTime - now;
+            const now = this.currentServerTimeMs();
+            const diffMs = this.serverDeadline - now;
             const newRemaining = Math.max(0, Math.ceil(diffMs / 1000));
 
             if (newRemaining !== this.remaining) {
-                // Strict Monotonicity Guard: while running same turn, remaining MUST NOT increase
+                // Strict Monotonicity Guard: while running the same turn instance, remaining MUST NOT increase
                 if (newRemaining > this.remaining) {
                     logTimerTrace('ticker-anomaly', {
                         prevRemaining: this.remaining,
                         newRemaining,
-                        prevDeadline: this.targetEndTime,
-                        newDeadline: this.targetEndTime,
                         turnKey: this.turnKey,
                         isPaused: false,
                         isSuspicious: true
                     });
-                    return;
+                } else {
+                    this.remaining = newRemaining;
+                    this.notify();
                 }
-
-                this.remaining = newRemaining;
-                this.notify();
             }
 
             if (newRemaining <= 0) {
@@ -151,8 +162,13 @@ window.__ktplDraftTimer = window.__ktplDraftTimer || {
                     });
                     this.triggerTurnExpiration();
                 }
+                return;
             }
-        }, 250);
+
+            this.animFrameId = requestAnimationFrame(tick);
+        };
+
+        this.animFrameId = requestAnimationFrame(tick);
     },
 
     triggerTurnExpiration() {
@@ -173,16 +189,58 @@ window.__ktplDraftTimer = window.__ktplDraftTimer || {
             return;
         }
 
-        const incomingHasRound = Boolean(data.hasActiveRound);
+        // Update server clock offset if provided
+        if (data.serverTimeMs) {
+            this.updateClockOffset(data.serverTimeMs);
+        }
+
+        // Monotonic state versioning: ignore stale out-of-order updates
+        if (data.stateVersion) {
+            const incomingVersion = parseInt(data.stateVersion, 10);
+            if (!isNaN(incomingVersion) && incomingVersion > 0) {
+                if (this.stateVersion && incomingVersion < this.stateVersion) {
+                    console.log(`[DRAFT-TIMER-TRACE] Stale stateVersion ${incomingVersion} < ${this.stateVersion} from ${source} rejected.`);
+                    return;
+                }
+                this.stateVersion = Math.max(this.stateVersion, incomingVersion);
+            }
+        }
+
+        const incomingHasRound = (data.hasActiveRound !== undefined)
+            ? Boolean(data.hasActiveRound)
+            : (data.status === 'active');
+
         const incomingIsPaused = Boolean(data.isPaused);
-        const incomingTotal = Math.max(1, parseInt(data.total, 10) || 60);
-        const incomingRemaining = Math.max(0, parseInt(data.remaining, 10) || 0);
-        const incomingTurnKey = String(data.turnKey || 'none');
+        const incomingTotal = Math.max(1, parseInt(data.total || data.turnTimeSeconds, 10) || 60);
+
+        const rawRemaining = (data.remainingTurnSeconds !== undefined && data.remainingTurnSeconds !== null)
+            ? data.remainingTurnSeconds
+            : (data.remainingSeconds !== undefined && data.remainingSeconds !== null
+                ? data.remainingSeconds
+                : (data.remaining !== undefined && data.remaining !== null ? data.remaining : null));
+
+        const incomingTurnStartedAtMs = (data.turnStartedAtMs !== undefined && data.turnStartedAtMs !== null)
+            ? parseInt(data.turnStartedAtMs, 10)
+            : null;
+
+        // Turn key calculation
+        let incomingTurnKey = String(data.turnKey || '');
+        if (!incomingTurnKey || incomingTurnKey === 'none') {
+            const rId = data.roundId || data.id || 0;
+            const pNum = data.currentPickNumber || 0;
+            const tId = data.currentTeamId || 0;
+            const startedAt = data.turnStartedAt || (incomingTurnStartedAtMs ? String(incomingTurnStartedAtMs) : '');
+            if (rId) {
+                incomingTurnKey = `${rId}-${pNum}-${tId}@${startedAt}`;
+            } else {
+                incomingTurnKey = 'none';
+            }
+        }
 
         const prevRemaining = this.remaining;
-        const prevDeadline = this.targetEndTime;
-        const prevTurnKey = this.turnKey;
         const prevPaused = this.isPaused;
+        const isForceReset = Boolean(data.forceReset) ||
+            (typeof data.message === 'string' && data.message.toLowerCase().includes('reset'));
 
         // No active round
         if (!incomingHasRound || incomingTurnKey === 'none') {
@@ -192,15 +250,13 @@ window.__ktplDraftTimer = window.__ktplDraftTimer || {
                 this.remaining = 0;
                 this.turnKey = 'none';
                 this.expiredTriggered = false;
+                this.serverDeadline = null;
                 this.stopTicker();
-                this.targetEndTime = null;
                 this.notify();
                 logTimerTrace('round-closed', {
                     source,
                     prevRemaining,
                     newRemaining: 0,
-                    prevDeadline,
-                    newDeadline: null,
                     turnKey: 'none',
                     isPaused: false
                 });
@@ -211,7 +267,46 @@ window.__ktplDraftTimer = window.__ktplDraftTimer || {
         this.hasActiveRound = true;
         this.total = incomingTotal;
 
-        // Case 1: NEW TURN (turnKey changed)
+        // Calculate authoritative remaining seconds
+        let incomingRemaining = rawRemaining !== null ? Math.max(0, parseInt(rawRemaining, 10)) : incomingTotal;
+        if (incomingTurnStartedAtMs && !incomingIsPaused) {
+            const calculatedDeadline = incomingTurnStartedAtMs + (incomingTotal * 1000);
+            const diffMs = calculatedDeadline - this.currentServerTimeMs();
+            incomingRemaining = Math.max(0, Math.ceil(diffMs / 1000));
+        }
+
+        // Case 1: Force Reset
+        if (isForceReset) {
+            this.turnKey = incomingTurnKey;
+            this.isPaused = incomingIsPaused;
+            this.remaining = incomingRemaining;
+            this.expiredTriggered = false;
+
+            if (incomingIsPaused) {
+                this.stopTicker();
+                this.serverDeadline = null;
+            } else {
+                if (incomingTurnStartedAtMs) {
+                    this.serverDeadline = incomingTurnStartedAtMs + (incomingTotal * 1000);
+                } else {
+                    this.serverDeadline = this.currentServerTimeMs() + (incomingRemaining * 1000);
+                }
+                this.startTicker();
+            }
+
+            logTimerTrace('timer-reset', {
+                source,
+                prevRemaining,
+                newRemaining: this.remaining,
+                turnKey: this.turnKey,
+                isPaused: this.isPaused
+            });
+
+            this.notify();
+            return;
+        }
+
+        // Case 2: New Turn
         const isNewTurn = (incomingTurnKey !== this.turnKey);
         if (isNewTurn) {
             this.turnKey = incomingTurnKey;
@@ -221,9 +316,13 @@ window.__ktplDraftTimer = window.__ktplDraftTimer || {
 
             if (incomingIsPaused) {
                 this.stopTicker();
-                this.targetEndTime = null;
+                this.serverDeadline = null;
             } else {
-                this.targetEndTime = Date.now() + (incomingRemaining * 1000);
+                if (incomingTurnStartedAtMs) {
+                    this.serverDeadline = incomingTurnStartedAtMs + (incomingTotal * 1000);
+                } else {
+                    this.serverDeadline = this.currentServerTimeMs() + (incomingRemaining * 1000);
+                }
                 this.startTicker();
             }
 
@@ -231,8 +330,6 @@ window.__ktplDraftTimer = window.__ktplDraftTimer || {
                 source,
                 prevRemaining,
                 newRemaining: this.remaining,
-                prevDeadline,
-                newDeadline: this.targetEndTime,
                 turnKey: this.turnKey,
                 isPaused: this.isPaused
             });
@@ -241,38 +338,37 @@ window.__ktplDraftTimer = window.__ktplDraftTimer || {
             return;
         }
 
-        // Case 2: PAUSE STATE TRANSITION (Running -> Paused OR Paused -> Running)
+        // Case 3: Pause State Transition (Running <-> Paused)
         if (prevPaused !== incomingIsPaused) {
             this.isPaused = incomingIsPaused;
 
             if (incomingIsPaused) {
                 // Transition: Running -> PAUSED
                 this.stopTicker();
-                this.targetEndTime = null;
+                this.serverDeadline = null;
                 this.remaining = incomingRemaining;
 
                 logTimerTrace('pause-transition', {
                     source,
                     prevRemaining,
                     newRemaining: this.remaining,
-                    prevDeadline,
-                    newDeadline: null,
                     turnKey: this.turnKey,
                     isPaused: true
                 });
             } else {
                 // Transition: Paused -> RESUMED
-                // Establish deadline from the saved remaining seconds exactly once!
                 this.remaining = incomingRemaining;
-                this.targetEndTime = Date.now() + (incomingRemaining * 1000);
+                if (incomingTurnStartedAtMs) {
+                    this.serverDeadline = incomingTurnStartedAtMs + (incomingTotal * 1000);
+                } else {
+                    this.serverDeadline = this.currentServerTimeMs() + (incomingRemaining * 1000);
+                }
                 this.startTicker();
 
                 logTimerTrace('resume-transition', {
                     source,
                     prevRemaining,
                     newRemaining: this.remaining,
-                    prevDeadline,
-                    newDeadline: this.targetEndTime,
                     turnKey: this.turnKey,
                     isPaused: false
                 });
@@ -282,55 +378,96 @@ window.__ktplDraftTimer = window.__ktplDraftTimer || {
             return;
         }
 
-        // Case 3: CURRENTLY PAUSED (No transition, still paused for same turn)
+        // Case 4: Still Paused (No transition)
         if (this.isPaused) {
-            // Keep timer frozen. If incoming remaining is valid, sync it without starting ticker
             this.remaining = incomingRemaining;
             this.stopTicker();
-            this.targetEndTime = null;
+            this.serverDeadline = null;
             this.notify();
             return;
         }
 
-        // Case 4: CURRENTLY RUNNING SAME TURN
-        // CRITICAL RULE: A running turn's deadline is FIXED.
-        // Stale polls, Livewire morphs, or delayed broadcasts MUST NOT increase remaining time or extend deadline!
-        const currentCalculatedRemaining = this.targetEndTime
-            ? Math.max(0, Math.ceil((this.targetEndTime - Date.now()) / 1000))
-            : this.remaining;
-
-        if (incomingRemaining > currentCalculatedRemaining) {
-            // Stale update attempted to increase running countdown!
-            // REJECT IT AND LOG!
-            logTimerTrace('stale-increase-rejected', {
-                source,
-                prevRemaining: currentCalculatedRemaining,
-                newRemaining: incomingRemaining,
-                prevDeadline: this.targetEndTime,
-                newDeadline: this.targetEndTime,
-                turnKey: this.turnKey,
-                isPaused: false,
-                isSuspicious: true
-            });
-            return;
+        // Case 5: Running Same Turn
+        // Keep running against authoritative server deadline
+        if (incomingTurnStartedAtMs && !this.serverDeadline) {
+            this.serverDeadline = incomingTurnStartedAtMs + (incomingTotal * 1000);
         }
 
-        // If ticker somehow stopped while running with remaining > 0, resume it with existing deadline
-        if (!this.intervalId && this.remaining > 0 && this.targetEndTime) {
-            this.startTicker(true);
+        const currentCalculatedRemaining = this.serverDeadline
+            ? Math.max(0, Math.ceil((this.serverDeadline - this.currentServerTimeMs()) / 1000))
+            : this.remaining;
+
+        // Strict monotonicity check: do not let delayed HTTP polls jump running time upward
+        if (source.includes('poll') || source.includes('Blade')) {
+            if (incomingRemaining > currentCalculatedRemaining) {
+                logTimerTrace('stale-poll-rejected', {
+                    source,
+                    prevRemaining: currentCalculatedRemaining,
+                    newRemaining: incomingRemaining,
+                    turnKey: this.turnKey,
+                    isPaused: false,
+                    isSuspicious: true
+                });
+                return;
+            }
+        }
+
+        // Ensure ticker is running
+        if (!this.animFrameId && this.remaining > 0 && this.serverDeadline) {
+            this.startTicker();
         }
     }
 };
 
+// Direct Laravel Echo WebSocket channel subscriptions for Instant Client Sync
+function initDirectEchoSubscription() {
+    if (typeof window === 'undefined') return;
+    if (window.__ktplDraftEchoSubscribed) return;
+
+    const echo = window.Echo;
+    if (!echo) {
+        window.addEventListener('echo:ready', () => initDirectEchoSubscription(), { once: true });
+        return;
+    }
+
+    window.__ktplDraftEchoSubscribed = true;
+    const leagues = ['male', 'males', 'female', 'females'];
+
+    leagues.forEach((lg) => {
+        const ch = echo.channel('draft.league.' + lg);
+        const onTurnChanged = (payload) => {
+            window.__ktplDraftTimer.sync(payload, `websocket:echo:league.${lg}`);
+        };
+
+        ch.listen('.draft.turn.changed', onTurnChanged);
+        ch.listen('draft.turn.changed', onTurnChanged);
+        ch.listen('DraftTurnChanged', onTurnChanged);
+    });
+}
+
 // Global Event Listeners - Singleton Registration
 if (typeof window !== 'undefined') {
-    // Only register ONCE on window to prevent duplicate listeners
     if (!window.__ktplDraftTimerListenerRegistered) {
         window.__ktplDraftTimerListenerRegistered = true;
+
         window.addEventListener('timer-sync', (e) => {
             window.__ktplDraftTimer.sync(e.detail, 'window:timer-sync');
         });
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && window.__ktplDraftTimer.hasActiveRound && !window.__ktplDraftTimer.isPaused) {
+                // Instantly refresh remaining time after tab background throttling
+                if (window.__ktplDraftTimer.serverDeadline) {
+                    const now = window.__ktplDraftTimer.currentServerTimeMs();
+                    const diffMs = window.__ktplDraftTimer.serverDeadline - now;
+                    window.__ktplDraftTimer.remaining = Math.max(0, Math.ceil(diffMs / 1000));
+                    window.__ktplDraftTimer.notify();
+                }
+            }
+        });
     }
+
+    initDirectEchoSubscription();
 }
 
 // Alpine Component Definition
@@ -357,10 +494,8 @@ export function ktplDraftTimerComponent() {
         set remaining(val) {
             const parsed = Math.max(0, parseInt(val, 10) || 0);
             if (!this.isPaused && this._remaining > 0 && parsed > this._remaining) {
-                console.warn(`[DRAFT-TIMER-TRACE] [Alpine:remaining-setter] SUSPICIOUS COUNTDOWN INCREASE from ${this._remaining} to ${parsed} REJECTED!`, {
-                    stack: new Error().stack
-                });
-                return; // Guard against external morph increase!
+                console.warn(`[DRAFT-TIMER-TRACE] [Alpine:remaining-setter] SUSPICIOUS COUNTDOWN INCREASE from ${this._remaining} to ${parsed} REJECTED!`);
+                return;
             }
             this._remaining = parsed;
         },

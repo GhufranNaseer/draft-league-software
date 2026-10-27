@@ -2,10 +2,10 @@
 
 namespace Database\Seeders;
 
-use Illuminate\Database\Seeder;
-use Illuminate\Support\Facades\Hash;
 use App\Models\User;
 use Carbon\Carbon;
+use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Hash;
 
 class TestUserSeeder extends Seeder
 {
@@ -17,10 +17,10 @@ class TestUserSeeder extends Seeder
         // Create or update test user
         $email = 'test@example.com';
         $password = 'Test@123456';
-        
+
         $user = User::where('email', $email)->first();
 
-        if (!$user) {
+        if (! $user) {
             User::create([
                 'name' => 'Test User',
                 'email' => $email,

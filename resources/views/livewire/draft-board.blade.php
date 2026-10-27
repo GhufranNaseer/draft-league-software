@@ -4,13 +4,18 @@
         remaining: {{ (int) $activeRoundRemainingSeconds }},
         total: {{ (int) ($activeRound->turn_time_seconds ?? 60) }},
         isPaused: {{ ($activeRound && $activeRound->is_paused) ? 'true' : 'false' }},
-        turnKey: '{{ $activeRound ? ($activeRound->id . '-' . $activeRound->current_pick_number) : 'none' }}',
-        hasActiveRound: {{ $activeRound ? 'true' : 'false' }}
+        turnKey: '{{ $activeRound ? ($activeRound->id . '-' . $activeRound->current_pick_number . '@' . ($activeRound->current_turn_started_at?->toIso8601String() ?? '')) : 'none' }}',
+        hasActiveRound: {{ $activeRound ? 'true' : 'false' }},
+        turnStartedAtMs: {{ $activeRound && $activeRound->current_turn_started_at ? $activeRound->current_turn_started_at->getTimestampMs() : 'null' }},
+        serverTimeMs: {{ (int) round(microtime(true) * 1000) }},
+        stateVersion: {{ (int) round(microtime(true) * 1000) }}
     })"
     x-destroy="destroyTimer()"
 >
     @if($activeRound && !$activeRound->is_paused)
-        <div wire:poll.3s="pollActiveRound" class="d-none"></div>
+        <div wire:poll.10s="pollActiveRound" class="d-none"></div>
+    @else
+        <div wire:poll.15s="pollActiveRound" class="d-none"></div>
     @endif
 
     <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-2 mb-3">
@@ -36,7 +41,7 @@
                         <span class="mx-1">|</span>
                         Pick {{ $activeRound->current_pick_number }} / {{ collect($activeRound->pick_order)->map(fn ($id) => (int) $id)->filter(fn ($id) => $id > 0)->count() }}
                         <span class="mx-1">|</span>
-                        Timer: <strong><span x-text="`${formatTime(remaining)} / ${formatTime(total)}`"></span></strong>
+                        Timer: <span wire:ignore><strong><span x-text="`${formatTime(remaining)} / ${formatTime(total)}`"></span></strong></span>
                         <span class="badge bg-warning text-dark ms-1" x-show="isPaused" style="{{ ($activeRound && $activeRound->is_paused) ? '' : 'display: none;' }}"><i class="bi bi-pause-fill"></i> PAUSED</span>
                     </div>
                     <div class="d-flex align-items-center gap-2">
@@ -49,10 +54,14 @@
                                 <i class="bi bi-pause-fill"></i> <span wire:loading.remove wire:target="pauseRound">Pause</span><span wire:loading wire:target="pauseRound">Pausing...</span>
                             </button>
                         @endif
+                        <button class="btn btn-sm btn-outline-secondary" wire:click="resetRoundTimer({{ $activeRound->id }})" wire:loading.attr="disabled" type="button" title="Reset timer to configured round duration">
+                            <i class="bi bi-arrow-counterclockwise"></i> <span wire:loading.remove wire:target="resetRoundTimer">Reset</span><span wire:loading wire:target="resetRoundTimer">Resetting...</span>
+                        </button>
                         <form method="POST" action="{{ route('admin.draft.round.close', $activeRound->id) }}" onsubmit="return confirm('Close the active round now?');" class="d-inline mb-0">
                             @csrf
                             <button class="btn btn-sm btn-outline-danger" type="submit">Close Round</button>
                         </form>
+
                     </div>
                 </div>
             </div>

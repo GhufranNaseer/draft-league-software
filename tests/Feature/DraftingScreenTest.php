@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Events\DraftPlayerPicked;
+use App\Events\DraftTurnChanged;
 use App\Models\Category;
+use App\Models\DraftPick;
 use App\Models\DraftRound;
 use App\Models\Participant;
 use App\Models\Team;
@@ -305,13 +307,178 @@ class DraftingScreenTest extends TestCase
         $this->assertNull($json['player']['passportPictureUrl']);
     }
 
-    public function test_portal_navbar_contains_drafting_screen_link_for_admin(): void
+    public function test_drafting_screen_renders_countdown_and_card_view_containers_and_handles_active_round_timer(): void
     {
         $admin = $this->createAdminUser();
+        [$round, $teamA] = $this->createDraftSetup();
 
-        $response = $this->actingAs($admin)->get(route('admin.dashboard'));
+        $response = $this->actingAs($admin)->get(route('admin.drafting-screen'));
         $response->assertStatus(200);
-        $response->assertSee(route('admin.drafting-screen'));
-        $response->assertSee('Drafting Screen');
+        $response->assertSee('id="countdownView"', false);
+        $response->assertSee('id="cardView"', false);
+        $response->assertSee('id="digits"', false);
+        $response->assertSee('ON THE CLOCK');
+        $response->assertSee(strtoupper($teamA->name));
+    }
+
+    public function test_latest_drafting_pick_endpoint_includes_active_round_timer_details(): void
+    {
+        $admin = $this->createAdminUser();
+        [$round, $teamA] = $this->createDraftSetup();
+
+        $json = $this->actingAs($admin)->get(route('admin.drafting-screen.latest'))->json();
+
+        $this->assertArrayHasKey('activeRound', $json);
+        $this->assertNotNull($json['activeRound']);
+        $this->assertEquals($round->id, $json['activeRound']['id']);
+        $this->assertEquals('active', $json['activeRound']['status']);
+        $this->assertEquals($teamA->name, $json['activeRound']['currentTeamName']);
+        $this->assertGreaterThan(0, $json['activeRound']['remainingSeconds']);
+        $this->assertTrue($json['activeRound']['isRunningTurn']);
+    }
+
+    public function test_drafting_screen_identifies_unstarted_or_paused_turns_as_not_running(): void
+    {
+        $admin = $this->createAdminUser();
+        [$round, $teamA] = $this->createDraftSetup();
+
+        // 1. Turn not yet started (current_turn_started_at is null)
+        $round->update(['current_turn_started_at' => null, 'is_paused' => false]);
+        $json = $this->actingAs($admin)->get(route('admin.drafting-screen.latest'))->json();
+        $this->assertFalse($json['activeRound']['isRunningTurn']);
+        $this->assertEquals(0, $json['activeRound']['remainingSeconds']);
+
+        // 2. Turn paused
+        $round->update(['current_turn_started_at' => now(), 'is_paused' => true, 'remaining_turn_seconds' => 45]);
+        $json = $this->actingAs($admin)->get(route('admin.drafting-screen.latest'))->json();
+        $this->assertFalse($json['activeRound']['isRunningTurn']);
+        $this->assertTrue($json['activeRound']['isPaused']);
+        $this->assertEquals(45, $json['activeRound']['remainingSeconds']);
+    }
+
+    public function test_admin_can_reset_draft_round_timer(): void
+    {
+        $admin = $this->createAdminUser();
+        [$round, $teamA] = $this->createDraftSetup();
+
+        // Set timer to elapsed time
+        $round->update([
+            'current_turn_started_at' => now()->subSeconds(25),
+            'turn_time_seconds' => 60,
+        ]);
+
+        $response = $this->actingAs($admin)->post(route('admin.draft.round.reset-timer', $round->id));
+        $response->assertSessionHas('success');
+
+        $fresh = $round->fresh();
+        $this->assertNotNull($fresh->current_turn_started_at);
+        $this->assertLessThanOrEqual(2, abs(now()->diffInSeconds($fresh->current_turn_started_at)));
+        $this->assertNull($fresh->remaining_turn_seconds);
+    }
+
+    public function test_draft_events_broadcast_on_singular_and_plural_channels_with_consistent_payload(): void
+    {
+        [$round, $teamA] = $this->createDraftSetup();
+
+        $turnEvent = new DraftTurnChanged($round, 'Turn started');
+        $channels = collect($turnEvent->broadcastOn())->map(fn ($c) => $c->name)->all();
+        $this->assertContains('draft.league.male', $channels);
+        $this->assertContains('draft.league.males', $channels);
+
+        $payload = $turnEvent->broadcastWith();
+        $this->assertArrayHasKey('roundNumber', $payload);
+        $this->assertArrayHasKey('remainingSeconds', $payload);
+        $this->assertEquals((int) $round->round_number, $payload['roundNumber']);
+
+        $participant = Participant::where('category_id', $round->category_id)->first();
+        $pick = DraftPick::create([
+            'draft_round_id' => $round->id,
+            'team_id' => $teamA->id,
+            'participant_id' => $participant->id,
+            'pick_number' => 1,
+            'picked_at' => now(),
+        ]);
+
+        $pickEvent = new DraftPlayerPicked($pick);
+        $pickChannels = collect($pickEvent->broadcastOn())->map(fn ($c) => $c->name)->all();
+        $this->assertContains('draft.league.male', $pickChannels);
+        $this->assertContains('draft.league.males', $pickChannels);
+    }
+
+    public function test_drafting_screen_view_contains_presentation_toggle_functions_and_dual_listeners(): void
+    {
+        $admin = $this->createAdminUser();
+        [$round, $teamA] = $this->createDraftSetup();
+
+        $response = $this->actingAs($admin)->get(route('admin.drafting-screen'));
+        $response->assertStatus(200);
+
+        // Verify presentation toggle methods and sync state
+        $response->assertSee('showCountdownView', false);
+        $response->assertSee('showCardView', false);
+        $response->assertSee('showingPickedCard', false);
+        $response->assertSee('toggleViewMode', false);
+        $response->assertSee('draft.league.males', false);
+    }
+
+    public function test_drafting_screen_resolves_active_round_and_latest_pick_with_plural_league_slug(): void
+    {
+        $admin = $this->createAdminUser();
+        [$round, $teamA] = $this->createDraftSetup();
+
+        // Update round to plural 'males'
+        $round->update(['league_type' => 'males']);
+
+        $response = $this->actingAs($admin)->get(route('admin.drafting-screen', ['league' => 'male']));
+        $response->assertStatus(200);
+        $response->assertSee(strtoupper($teamA->name));
+
+        $json = $this->actingAs($admin)->get(route('admin.drafting-screen.latest', ['league' => 'male']))->json();
+        $this->assertNotNull($json['activeRound']);
+        $this->assertEquals($round->id, $json['activeRound']['id']);
+        $this->assertEquals($teamA->name, $json['activeRound']['currentTeamName']);
+    }
+
+    public function test_drafting_screen_view_contains_countdown_synchronization_and_deduplication_guards(): void
+    {
+        $admin = $this->createAdminUser();
+        [$round, $teamA] = $this->createDraftSetup();
+
+        $response = $this->actingAs($admin)->get(route('admin.drafting-screen'));
+        $response->assertStatus(200);
+
+        // Verify deduplication and monotonicity synchronization logic
+        $response->assertSee('lastHandledTurnSig', false);
+        $response->assertSee('fonts.ready', false);
+        $response->assertSee('options.source === \'poll\'', false);
+        $response->assertSee('DraftTimer.setRemaining(remSec)', false);
+    }
+
+    public function test_authoritative_timer_payload_includes_server_timestamps_and_state_version(): void
+    {
+        $admin = $this->createAdminUser();
+        [$round, $teamA] = $this->createDraftSetup();
+
+        // 1. Verify DraftTurnChanged event contains server timestamps & stateVersion
+        $turnEvent = new DraftTurnChanged($round, 'Turn started');
+        $turnBroadcast = $turnEvent->broadcastWith();
+
+        $this->assertArrayHasKey('serverTime', $turnBroadcast);
+        $this->assertArrayHasKey('serverTimeMs', $turnBroadcast);
+        $this->assertArrayHasKey('turnStartedAtMs', $turnBroadcast);
+        $this->assertArrayHasKey('stateVersion', $turnBroadcast);
+        $this->assertIsInt($turnBroadcast['serverTimeMs']);
+        $this->assertIsInt($turnBroadcast['stateVersion']);
+        $this->assertGreaterThan(0, $turnBroadcast['serverTimeMs']);
+
+        // 2. Verify latest drafting screen API endpoint provides serverTimeMs and activeRound timestamps
+        $json = $this->actingAs($admin)->get(route('admin.drafting-screen.latest', ['league' => 'male']))->json();
+        $this->assertArrayHasKey('serverTime', $json);
+        $this->assertArrayHasKey('serverTimeMs', $json);
+        $this->assertArrayHasKey('stateVersion', $json);
+        $this->assertNotNull($json['activeRound']);
+        $this->assertArrayHasKey('turnStartedAtMs', $json['activeRound']);
+        $this->assertArrayHasKey('serverTimeMs', $json['activeRound']);
+        $this->assertArrayHasKey('stateVersion', $json['activeRound']);
     }
 }

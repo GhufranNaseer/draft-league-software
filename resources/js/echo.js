@@ -20,5 +20,9 @@ window.Echo = new Echo({
     wsPort: currentPort,
     wssPort: currentPort,
     forceTLS: isHttps || (import.meta.env.VITE_REVERB_SCHEME ?? 'http') === 'https',
-    enabledTransports: isHttps || (import.meta.env.VITE_REVERB_SCHEME ?? 'http') === 'https' ? ['wss'] : ['ws', 'wss'],
+    enabledTransports: ['ws', 'wss'],
 });
+
+if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('echo:ready', { detail: { echo: window.Echo } }));
+}

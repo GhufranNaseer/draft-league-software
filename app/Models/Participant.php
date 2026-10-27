@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Casts\AsCollection;
 
 class Participant extends Model
 {
@@ -117,6 +116,6 @@ class Participant extends Model
      */
     public function getFullNameAttribute(): string
     {
-        return trim((string) $this->first_name . ' ' . (string) $this->last_name);
+        return trim((string) $this->first_name.' '.(string) $this->last_name);
     }
 }

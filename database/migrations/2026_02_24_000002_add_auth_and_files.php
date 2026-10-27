@@ -14,10 +14,10 @@ return new class extends Migration
         // Update users table with admin fields
         if (Schema::hasTable('users')) {
             Schema::table('users', function (Blueprint $table) {
-                if (!Schema::hasColumn('users', 'is_admin')) {
+                if (! Schema::hasColumn('users', 'is_admin')) {
                     $table->boolean('is_admin')->default(false)->after('email_verified_at');
                 }
-                if (!Schema::hasColumn('users', 'created_by_admin')) {
+                if (! Schema::hasColumn('users', 'created_by_admin')) {
                     $table->boolean('created_by_admin')->default(false)->after('is_admin');
                 }
             });

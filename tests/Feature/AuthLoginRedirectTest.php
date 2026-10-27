@@ -33,7 +33,7 @@ class AuthLoginRedirectTest extends TestCase
         $response = $this->get(route('login'));
 
         $response->assertStatus(200);
-        $response->assertSee('action="' . route('login.post') . '"', false);
+        $response->assertSee('action="'.route('login.post').'"', false);
         $response->assertSee('method="POST"', false);
     }
 
@@ -151,7 +151,7 @@ class AuthLoginRedirectTest extends TestCase
         $this->assertAuthenticatedAs($admin);
 
         // Test root URL with trailing slash
-        $responseSlash = $this->withSession(['url.intended' => url('/') . '/'])
+        $responseSlash = $this->withSession(['url.intended' => url('/').'/'])
             ->post(route('login.post'), [
                 'email' => $admin->email,
                 'password' => $password,

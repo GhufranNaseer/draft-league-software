@@ -30,8 +30,19 @@ class DraftPlayerPicked implements ShouldBroadcastNow, ShouldDispatchAfterCommit
 
     public array $player;
 
+    public string $serverTime;
+
+    public int $serverTimeMs;
+
+    public int $stateVersion;
+
     public function __construct(DraftPick $pick)
     {
+        $now = now();
+        $this->serverTime = $now->toIso8601String();
+        $this->serverTimeMs = (int) round(microtime(true) * 1000);
+        $this->stateVersion = $this->serverTimeMs;
+
         $pick->loadMissing(['participant.category', 'team', 'round']);
         $participant = $pick->participant;
         $skills = collect($participant?->skill_categories ?? [])->filter()->values();
@@ -73,9 +84,22 @@ class DraftPlayerPicked implements ShouldBroadcastNow, ShouldDispatchAfterCommit
             'pickNumber' => $this->pickNumber,
             'teamName' => $this->teamName,
             'player' => $this->player,
+            'serverTimeMs' => $this->serverTimeMs,
+            'stateVersion' => $this->stateVersion,
         ]);
 
-        return [new Channel($channel)];
+        $channels = [new Channel($channel)];
+        if ($this->leagueType === 'male') {
+            $channels[] = new Channel('draft.league.males');
+        } elseif ($this->leagueType === 'males') {
+            $channels[] = new Channel('draft.league.male');
+        } elseif ($this->leagueType === 'female') {
+            $channels[] = new Channel('draft.league.females');
+        } elseif ($this->leagueType === 'females') {
+            $channels[] = new Channel('draft.league.female');
+        }
+
+        return $channels;
     }
 
     public function broadcastAs(): string
@@ -93,6 +117,9 @@ class DraftPlayerPicked implements ShouldBroadcastNow, ShouldDispatchAfterCommit
             'pickedAt' => $this->pickedAt,
             'teamName' => $this->teamName,
             'player' => $this->player,
+            'serverTime' => $this->serverTime,
+            'serverTimeMs' => $this->serverTimeMs,
+            'stateVersion' => $this->stateVersion,
         ];
     }
 }

@@ -640,6 +640,20 @@ class TeamController extends Controller
     }
 
     /**
+     * Reset an active draft round timer.
+     */
+    public function resetRoundTimer(DraftRound $round)
+    {
+        if ($round->status !== 'active') {
+            return back()->with('error', 'Only active draft rounds can have their timer reset.');
+        }
+
+        $this->draftService->resetTimer($round);
+
+        return back()->with('success', 'Draft round timer reset successfully.');
+    }
+
+    /**
      * Create a team (players are not assigned here).
      */
     public function store(Request $request)
@@ -1160,14 +1174,6 @@ class TeamController extends Controller
                 'drafted_at' => null,
             ]);
 
-        if (DraftRound::query()->count() === 0) {
-            $driver = DB::connection()->getDriverName();
-            if ($driver === 'sqlite') {
-                DB::statement("DELETE FROM sqlite_sequence WHERE name IN ('draft_rounds', 'draft_picks')");
-            } elseif ($driver === 'mysql') {
-                DB::statement('ALTER TABLE draft_picks AUTO_INCREMENT = 1');
-                DB::statement('ALTER TABLE draft_rounds AUTO_INCREMENT = 1');
-            }
-        }
+        // Auto-increment resets removed to prevent MySQL implicit transaction commit
     }
 }

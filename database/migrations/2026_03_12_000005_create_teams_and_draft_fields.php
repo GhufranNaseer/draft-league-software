@@ -24,11 +24,11 @@ return new class extends Migration
         });
 
         Schema::table('participants', function (Blueprint $table) {
-            if (!Schema::hasColumn('participants', 'team_id')) {
+            if (! Schema::hasColumn('participants', 'team_id')) {
                 $table->foreignId('team_id')->nullable()->after('category_id')->constrained('teams')->nullOnDelete();
             }
 
-            if (!Schema::hasColumn('participants', 'drafted_at')) {
+            if (! Schema::hasColumn('participants', 'drafted_at')) {
                 $table->timestamp('drafted_at')->nullable()->after('team_id');
             }
         });

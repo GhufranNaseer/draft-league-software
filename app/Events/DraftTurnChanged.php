@@ -38,11 +38,26 @@ class DraftTurnChanged implements ShouldBroadcastNow, ShouldDispatchAfterCommit
 
     public bool $isPaused;
 
+    public bool $isRunningTurn;
+
     public ?int $remainingTurnSeconds;
+
+    public ?int $turnStartedAtMs;
+
+    public string $serverTime;
+
+    public int $serverTimeMs;
+
+    public int $stateVersion;
 
     public function __construct(DraftRound $round, ?string $message = null)
     {
         $round->loadMissing('currentTeam');
+
+        $now = now();
+        $this->serverTime = $now->toIso8601String();
+        $this->serverTimeMs = (int) round(microtime(true) * 1000);
+        $this->stateVersion = $this->serverTimeMs;
 
         $this->roundId = (int) $round->id;
         $this->roundNumber = (int) ($round->round_number ?: $round->id);
@@ -54,15 +69,19 @@ class DraftTurnChanged implements ShouldBroadcastNow, ShouldDispatchAfterCommit
         $this->status = (string) $round->status;
         $this->message = $message;
         $this->turnStartedAt = $round->current_turn_started_at?->toIso8601String();
+        $this->turnStartedAtMs = $round->current_turn_started_at ? (int) $round->current_turn_started_at->getTimestampMs() : null;
         $this->turnTimeSeconds = (int) $round->turn_time_seconds;
         $this->isPaused = (bool) $round->is_paused;
         if ($this->isPaused) {
             $this->remainingTurnSeconds = $round->remaining_turn_seconds !== null ? (int) $round->remaining_turn_seconds : (int) $round->turn_time_seconds;
+            $this->isRunningTurn = false;
         } elseif ($round->current_turn_started_at) {
             $elapsed = (int) floor(abs(now()->diffInSeconds($round->current_turn_started_at)));
             $this->remainingTurnSeconds = max(0, (int) $round->turn_time_seconds - $elapsed);
+            $this->isRunningTurn = ($this->status === 'active' && $this->remainingTurnSeconds > 0);
         } else {
-            $this->remainingTurnSeconds = (int) $round->turn_time_seconds;
+            $this->remainingTurnSeconds = 0;
+            $this->isRunningTurn = false;
         }
     }
 
@@ -73,6 +92,7 @@ class DraftTurnChanged implements ShouldBroadcastNow, ShouldDispatchAfterCommit
         Log::debug('DraftTurnChanged broadcasting.', [
             'channel' => $channel,
             'roundId' => $this->roundId,
+            'roundNumber' => $this->roundNumber,
             'leagueType' => $this->leagueType,
             'currentTeamId' => $this->currentTeamId,
             'currentTeamName' => $this->currentTeamName,
@@ -80,13 +100,28 @@ class DraftTurnChanged implements ShouldBroadcastNow, ShouldDispatchAfterCommit
             'totalPicksPlanned' => $this->totalPicksPlanned,
             'status' => $this->status,
             'turnStartedAt' => $this->turnStartedAt,
+            'turnStartedAtMs' => $this->turnStartedAtMs,
             'turnTimeSeconds' => $this->turnTimeSeconds,
             'isPaused' => $this->isPaused,
+            'isRunningTurn' => $this->isRunningTurn,
             'remainingTurnSeconds' => $this->remainingTurnSeconds,
+            'serverTimeMs' => $this->serverTimeMs,
+            'stateVersion' => $this->stateVersion,
             'message' => $this->message,
         ]);
 
-        return [new Channel($channel)];
+        $channels = [new Channel($channel)];
+        if ($this->leagueType === 'male') {
+            $channels[] = new Channel('draft.league.males');
+        } elseif ($this->leagueType === 'males') {
+            $channels[] = new Channel('draft.league.male');
+        } elseif ($this->leagueType === 'female') {
+            $channels[] = new Channel('draft.league.females');
+        } elseif ($this->leagueType === 'females') {
+            $channels[] = new Channel('draft.league.female');
+        }
+
+        return $channels;
     }
 
     public function broadcastAs(): string
@@ -98,6 +133,7 @@ class DraftTurnChanged implements ShouldBroadcastNow, ShouldDispatchAfterCommit
     {
         return [
             'roundId' => $this->roundId,
+            'roundNumber' => $this->roundNumber,
             'leagueType' => $this->leagueType,
             'currentTeamId' => $this->currentTeamId,
             'currentTeamName' => $this->currentTeamName,
@@ -106,9 +142,15 @@ class DraftTurnChanged implements ShouldBroadcastNow, ShouldDispatchAfterCommit
             'status' => $this->status,
             'message' => $this->message,
             'turnStartedAt' => $this->turnStartedAt,
+            'turnStartedAtMs' => $this->turnStartedAtMs,
             'turnTimeSeconds' => $this->turnTimeSeconds,
             'isPaused' => $this->isPaused,
+            'isRunningTurn' => $this->isRunningTurn,
             'remainingTurnSeconds' => $this->remainingTurnSeconds,
+            'remainingSeconds' => $this->remainingTurnSeconds,
+            'serverTime' => $this->serverTime,
+            'serverTimeMs' => $this->serverTimeMs,
+            'stateVersion' => $this->stateVersion,
         ];
     }
 }

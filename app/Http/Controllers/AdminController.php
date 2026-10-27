@@ -561,6 +561,16 @@ class AdminController extends Controller
     {
         $draftService = app(DraftService::class);
         $leagueType = $draftService->normalizeLeagueType($request->query('league'));
+        $leagueVariants = [$leagueType];
+        if ($leagueType === 'male') {
+            $leagueVariants[] = 'males';
+        } elseif ($leagueType === 'males') {
+            $leagueVariants[] = 'male';
+        } elseif ($leagueType === 'female') {
+            $leagueVariants[] = 'females';
+        } elseif ($leagueType === 'females') {
+            $leagueVariants[] = 'female';
+        }
 
         $availableLeagues = League::query()
             ->where('is_active', true)
@@ -569,10 +579,13 @@ class AdminController extends Controller
             ->get();
 
         $activeRound = DraftRound::query()
-            ->where('league_type', $leagueType)
+            ->with(['currentTeam', 'category'])
+            ->whereIn('league_type', $leagueVariants)
             ->where('status', 'active')
             ->latest('id')
             ->first();
+
+        $activeRoundData = $this->formatActiveRoundData($activeRound);
 
         $latestPick = null;
         if ($activeRound) {
@@ -586,7 +599,7 @@ class AdminController extends Controller
         if (! $latestPick) {
             $latestPick = DraftPick::query()
                 ->with(['participant.category', 'team', 'round.category'])
-                ->whereHas('round', fn ($q) => $q->where('league_type', $leagueType))
+                ->whereHas('round', fn ($q) => $q->whereIn('league_type', $leagueVariants))
                 ->latest('id')
                 ->first();
         }
@@ -597,6 +610,7 @@ class AdminController extends Controller
             'leagueType' => $leagueType,
             'availableLeagues' => $availableLeagues,
             'activeRound' => $activeRound,
+            'activeRoundData' => $activeRoundData,
             'initialPick' => $formattedPick,
         ]);
     }
@@ -608,12 +622,25 @@ class AdminController extends Controller
     {
         $draftService = app(DraftService::class);
         $leagueType = $draftService->normalizeLeagueType($request->query('league'));
+        $leagueVariants = [$leagueType];
+        if ($leagueType === 'male') {
+            $leagueVariants[] = 'males';
+        } elseif ($leagueType === 'males') {
+            $leagueVariants[] = 'male';
+        } elseif ($leagueType === 'female') {
+            $leagueVariants[] = 'females';
+        } elseif ($leagueType === 'females') {
+            $leagueVariants[] = 'female';
+        }
 
         $activeRound = DraftRound::query()
-            ->where('league_type', $leagueType)
+            ->with(['currentTeam', 'category'])
+            ->whereIn('league_type', $leagueVariants)
             ->where('status', 'active')
             ->latest('id')
             ->first();
+
+        $activeRoundData = $this->formatActiveRoundData($activeRound);
 
         $latestPick = null;
         if ($activeRound) {
@@ -627,14 +654,17 @@ class AdminController extends Controller
         if (! $latestPick) {
             $latestPick = DraftPick::query()
                 ->with(['participant.category', 'team', 'round.category'])
-                ->whereHas('round', fn ($q) => $q->where('league_type', $leagueType))
+                ->whereHas('round', fn ($q) => $q->whereIn('league_type', $leagueVariants))
                 ->latest('id')
                 ->first();
         }
 
         $formattedPick = $this->formatDraftPickData($latestPick);
 
-        return response()->json($formattedPick ?: [
+        $now = now();
+        $serverTimeMs = (int) round(microtime(true) * 1000);
+
+        $response = $formattedPick ?: [
             'pickId' => 0,
             'roundId' => $activeRound?->id ?? 0,
             'leagueType' => $leagueType,
@@ -642,7 +672,59 @@ class AdminController extends Controller
             'pickedAt' => null,
             'teamName' => null,
             'player' => null,
-        ]);
+        ];
+
+        $response['serverTime'] = $now->toIso8601String();
+        $response['serverTimeMs'] = $serverTimeMs;
+        $response['stateVersion'] = $serverTimeMs;
+        $response['activeRound'] = $activeRoundData;
+
+        return response()->json($response);
+    }
+
+    private function formatActiveRoundData(?DraftRound $round): ?array
+    {
+        if (! $round) {
+            return null;
+        }
+
+        $remainingSeconds = 0;
+        $isRunningTurn = false;
+
+        if ($round->status === 'active' && ! $round->is_paused && $round->current_turn_started_at !== null) {
+            $elapsed = (int) floor(abs(now()->diffInSeconds($round->current_turn_started_at)));
+            $remainingSeconds = max(0, (int) $round->turn_time_seconds - $elapsed);
+            $isRunningTurn = ($remainingSeconds > 0);
+        } elseif ($round->is_paused) {
+            $remainingSeconds = $round->remaining_turn_seconds !== null ? (int) $round->remaining_turn_seconds : (int) $round->turn_time_seconds;
+            $isRunningTurn = false;
+        } else {
+            $remainingSeconds = 0;
+            $isRunningTurn = false;
+        }
+
+        $now = now();
+        $serverTimeMs = (int) round(microtime(true) * 1000);
+
+        return [
+            'id' => (int) $round->id,
+            'roundNumber' => (int) ($round->round_number ?: $round->id),
+            'status' => (string) $round->status,
+            'currentTeamId' => $round->current_team_id ? (int) $round->current_team_id : null,
+            'currentTeamName' => $round->currentTeam?->name ?? '—',
+            'currentPickNumber' => (int) $round->current_pick_number,
+            'categoryName' => $round->category?->name ?? '—',
+            'turnTimeSeconds' => (int) ($round->turn_time_seconds ?: 60),
+            'remainingSeconds' => (int) $remainingSeconds,
+            'remainingTurnSeconds' => (int) $remainingSeconds,
+            'isPaused' => (bool) $round->is_paused,
+            'isRunningTurn' => (bool) $isRunningTurn,
+            'turnStartedAt' => $round->current_turn_started_at?->toIso8601String(),
+            'turnStartedAtMs' => $round->current_turn_started_at ? (int) $round->current_turn_started_at->getTimestampMs() : null,
+            'serverTime' => $now->toIso8601String(),
+            'serverTimeMs' => $serverTimeMs,
+            'stateVersion' => $serverTimeMs,
+        ];
     }
 
     private function formatDraftPickData(?DraftPick $pick): ?array

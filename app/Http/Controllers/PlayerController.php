@@ -16,7 +16,7 @@ class PlayerController extends Controller
         /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || (!$user->hasRole('player') && !$user->isAdmin())) {
+        if (! $user || (! $user->hasRole('player') && ! $user->isAdmin())) {
             abort(403, 'Unauthorized. Player access required.');
         }
 
@@ -25,7 +25,7 @@ class PlayerController extends Controller
             ->where('email', $user->email)
             ->first();
 
-        if (!$participant) {
+        if (! $participant) {
             abort(404, 'No participant profile is linked to this account email.');
         }
 

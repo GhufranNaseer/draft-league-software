@@ -61,12 +61,12 @@ class AuthLogoutTest extends TestCase
         $response->assertStatus(200);
 
         // Asserts presence of POST form with action to logout
-        $response->assertSee('action="' . route('logout') . '"', false);
+        $response->assertSee('action="'.route('logout').'"', false);
         $response->assertSee('method="POST"', false);
         $response->assertSee('type="submit"', false);
 
         // Asserts absence of any GET anchor tag pointing to logout
-        $response->assertDontSee('href="' . route('logout') . '"', false);
+        $response->assertDontSee('href="'.route('logout').'"', false);
         $response->assertDontSee('href="/logout"', false);
     }
 }

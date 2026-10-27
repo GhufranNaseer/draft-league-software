@@ -32,6 +32,7 @@ class DraftBoard extends Component
     }
 
     #[On('echo:draft.league.{leagueType},.draft.turn.changed')]
+    #[On('echo:draft.league.{leagueType},draft.turn.changed')]
     public function turnChanged(array $event = []): void
     {
         if (! empty($event) && isset($event['roundId'])) {
@@ -42,6 +43,11 @@ class DraftBoard extends Component
             $remaining = isset($event['remainingTurnSeconds']) && $event['remainingTurnSeconds'] !== null
                 ? (int) $event['remainingTurnSeconds']
                 : $total;
+            $startedAt = $event['turnStartedAt'] ?? '';
+            $startedAtMs = isset($event['turnStartedAtMs']) ? (int) $event['turnStartedAtMs'] : null;
+            $serverTimeMs = isset($event['serverTimeMs']) ? (int) $event['serverTimeMs'] : (int) round(microtime(true) * 1000);
+            $stateVersion = isset($event['stateVersion']) ? (int) $event['stateVersion'] : $serverTimeMs;
+            $forceReset = ! empty($event['message']) && str_contains(strtolower($event['message']), 'reset');
 
             Log::debug('[DRAFT-TIMER-DEBUG] DraftBoard::turnChanged broadcast handled.', [
                 'round_id' => $roundId,
@@ -55,8 +61,12 @@ class DraftBoard extends Component
                 'remaining' => $remaining,
                 'isPaused' => $isPaused,
                 'total' => $total,
-                'turnKey' => $roundId.'-'.$pickNumber,
+                'turnKey' => $roundId.'-'.$pickNumber.($startedAt ? ('@'.$startedAt) : ''),
                 'hasActiveRound' => ($event['status'] ?? '') === 'active',
+                'forceReset' => $forceReset,
+                'turnStartedAtMs' => $startedAtMs,
+                'serverTimeMs' => $serverTimeMs,
+                'stateVersion' => $stateVersion,
             ]);
         }
     }
@@ -67,6 +77,9 @@ class DraftBoard extends Component
         if ($round) {
             $updated = app(DraftService::class)->pause($round);
             $remaining = (int) ($updated->remaining_turn_seconds ?? 0);
+            $startedAt = $updated->current_turn_started_at?->toIso8601String() ?? '';
+            $serverTimeMs = (int) round(microtime(true) * 1000);
+
             Log::debug('[DRAFT-TIMER-DEBUG] DraftBoard::pauseRound executed.', [
                 'round_id' => $updated->id,
                 'remaining' => $remaining,
@@ -76,8 +89,11 @@ class DraftBoard extends Component
                 'remaining' => $remaining,
                 'isPaused' => true,
                 'total' => (int) $updated->turn_time_seconds,
-                'turnKey' => $updated->id.'-'.$updated->current_pick_number,
+                'turnKey' => $updated->id.'-'.$updated->current_pick_number.($startedAt ? ('@'.$startedAt) : ''),
                 'hasActiveRound' => true,
+                'turnStartedAtMs' => null,
+                'serverTimeMs' => $serverTimeMs,
+                'stateVersion' => $serverTimeMs,
             ]);
         }
     }
@@ -89,6 +105,10 @@ class DraftBoard extends Component
             $updated = app(DraftService::class)->resume($round);
             $elapsed = $updated->current_turn_started_at ? abs(Carbon::now()->diffInSeconds($updated->current_turn_started_at)) : 0;
             $rem = max(0, (int) $updated->turn_time_seconds - (int) $elapsed);
+            $startedAt = $updated->current_turn_started_at?->toIso8601String() ?? '';
+            $startedAtMs = $updated->current_turn_started_at ? (int) $updated->current_turn_started_at->getTimestampMs() : null;
+            $serverTimeMs = (int) round(microtime(true) * 1000);
+
             Log::debug('[DRAFT-TIMER-DEBUG] DraftBoard::resumeRound executed.', [
                 'round_id' => $updated->id,
                 'remaining' => $rem,
@@ -98,8 +118,44 @@ class DraftBoard extends Component
                 'remaining' => (int) $rem,
                 'isPaused' => false,
                 'total' => (int) $updated->turn_time_seconds,
-                'turnKey' => $updated->id.'-'.$updated->current_pick_number,
+                'turnKey' => $updated->id.'-'.$updated->current_pick_number.($startedAt ? ('@'.$startedAt) : ''),
                 'hasActiveRound' => true,
+                'turnStartedAtMs' => $startedAtMs,
+                'serverTimeMs' => $serverTimeMs,
+                'stateVersion' => $serverTimeMs,
+            ]);
+        }
+    }
+
+    public function resetRoundTimer(int $roundId): void
+    {
+        $round = DraftRound::find($roundId);
+        if ($round) {
+            $updated = app(DraftService::class)->resetTimer($round);
+            $total = (int) $updated->turn_time_seconds;
+            $remaining = $updated->is_paused
+                ? (int) ($updated->remaining_turn_seconds ?? $total)
+                : $total;
+            $startedAt = $updated->current_turn_started_at?->toIso8601String() ?? '';
+            $startedAtMs = $updated->current_turn_started_at ? (int) $updated->current_turn_started_at->getTimestampMs() : null;
+            $serverTimeMs = (int) round(microtime(true) * 1000);
+
+            Log::debug('[DRAFT-TIMER-DEBUG] DraftBoard::resetRoundTimer executed.', [
+                'round_id' => $updated->id,
+                'remaining' => $remaining,
+                'is_paused' => (bool) $updated->is_paused,
+            ]);
+
+            $this->dispatch('timer-sync', [
+                'remaining' => (int) $remaining,
+                'isPaused' => (bool) $updated->is_paused,
+                'total' => $total,
+                'turnKey' => $updated->id.'-'.$updated->current_pick_number.($startedAt ? ('@'.$startedAt) : ''),
+                'hasActiveRound' => true,
+                'forceReset' => true,
+                'turnStartedAtMs' => $startedAtMs,
+                'serverTimeMs' => $serverTimeMs,
+                'stateVersion' => $serverTimeMs,
             ]);
         }
     }

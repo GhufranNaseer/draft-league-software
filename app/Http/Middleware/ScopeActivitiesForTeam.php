@@ -16,11 +16,11 @@ class ScopeActivitiesForTeam
     {
         $user = $request->user();
 
-        if (!$user) {
+        if (! $user) {
             abort(403, 'Unauthorized.');
         }
 
-        if ($user->isAdmin() || !$user->hasRole('team')) {
+        if ($user->isAdmin() || ! $user->hasRole('team')) {
             return $next($request);
         }
 
@@ -28,7 +28,7 @@ class ScopeActivitiesForTeam
             ->whereRaw('LOWER(email) = ?', [strtolower((string) $user->email)])
             ->value('id');
 
-        if (!$linkedTeamId) {
+        if (! $linkedTeamId) {
             abort(403, 'No team account is linked to this user.');
         }
 

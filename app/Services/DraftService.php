@@ -292,6 +292,38 @@ class DraftService
     }
 
     /**
+     * Reset an active draft round turn timer to its full configured duration.
+     */
+    public function resetTimer(DraftRound $round): DraftRound
+    {
+        $updated = DB::transaction(function () use ($round) {
+            $locked = DraftRound::query()->lockForUpdate()->findOrFail($round->id);
+
+            if ($locked->status !== 'active') {
+                return $locked;
+            }
+
+            if ($locked->is_paused) {
+                $locked->update([
+                    'remaining_turn_seconds' => (int) $locked->turn_time_seconds,
+                    'current_turn_started_at' => null,
+                ]);
+            } else {
+                $locked->update([
+                    'remaining_turn_seconds' => null,
+                    'current_turn_started_at' => now(),
+                ]);
+            }
+
+            return $locked->fresh(['currentTeam']);
+        });
+
+        $this->broadcastTurnChanged($updated, 'Draft timer has been reset to '.((int) $updated->turn_time_seconds).' seconds.');
+
+        return $updated;
+    }
+
+    /**
      * Perform a draft pick.
      *
      * @return array{success: string}|array{error: string}

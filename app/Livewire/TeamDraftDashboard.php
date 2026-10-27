@@ -28,6 +28,7 @@ class TeamDraftDashboard extends Component
     }
 
     #[On('echo:draft.league.{leagueType},.draft.turn.changed')]
+    #[On('echo:draft.league.{leagueType},draft.turn.changed')]
     public function turnChanged(array $event = []): void
     {
         if (! empty($event) && isset($event['roundId'])) {
@@ -38,6 +39,11 @@ class TeamDraftDashboard extends Component
             $remaining = isset($event['remainingTurnSeconds']) && $event['remainingTurnSeconds'] !== null
                 ? (int) $event['remainingTurnSeconds']
                 : $total;
+            $startedAt = $event['turnStartedAt'] ?? '';
+            $startedAtMs = isset($event['turnStartedAtMs']) ? (int) $event['turnStartedAtMs'] : null;
+            $serverTimeMs = isset($event['serverTimeMs']) ? (int) $event['serverTimeMs'] : (int) round(microtime(true) * 1000);
+            $stateVersion = isset($event['stateVersion']) ? (int) $event['stateVersion'] : $serverTimeMs;
+            $forceReset = ! empty($event['message']) && str_contains(strtolower($event['message']), 'reset');
 
             Log::debug('[DRAFT-TIMER-DEBUG] TeamDraftDashboard::turnChanged broadcast handled.', [
                 'round_id' => $roundId,
@@ -51,8 +57,12 @@ class TeamDraftDashboard extends Component
                 'remaining' => $remaining,
                 'isPaused' => $isPaused,
                 'total' => $total,
-                'turnKey' => $roundId.'-'.$pickNumber,
+                'turnKey' => $roundId.'-'.$pickNumber.($startedAt ? ('@'.$startedAt) : ''),
                 'hasActiveRound' => ($event['status'] ?? '') === 'active',
+                'forceReset' => $forceReset,
+                'turnStartedAtMs' => $startedAtMs,
+                'serverTimeMs' => $serverTimeMs,
+                'stateVersion' => $stateVersion,
             ]);
         }
     }

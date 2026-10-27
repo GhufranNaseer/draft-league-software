@@ -4,13 +4,18 @@
         remaining: {{ (int) $activeRoundRemainingSeconds }},
         total: {{ (int) ($activeRound->turn_time_seconds ?? 60) }},
         isPaused: {{ ($activeRound && $activeRound->is_paused) ? 'true' : 'false' }},
-        turnKey: '{{ $activeRound ? ($activeRound->id . '-' . $activeRound->current_pick_number) : 'none' }}',
-        hasActiveRound: {{ $activeRound ? 'true' : 'false' }}
+        turnKey: '{{ $activeRound ? ($activeRound->id . '-' . $activeRound->current_pick_number . '@' . ($activeRound->current_turn_started_at?->toIso8601String() ?? '')) : 'none' }}',
+        hasActiveRound: {{ $activeRound ? 'true' : 'false' }},
+        turnStartedAtMs: {{ $activeRound && $activeRound->current_turn_started_at ? $activeRound->current_turn_started_at->getTimestampMs() : 'null' }},
+        serverTimeMs: {{ (int) round(microtime(true) * 1000) }},
+        stateVersion: {{ (int) round(microtime(true) * 1000) }}
     })"
     x-destroy="destroyTimer()"
 >
     @if($activeRound && !$activeRound->is_paused)
-        <div wire:poll.3s="pollActiveRound" class="d-none"></div>
+        <div wire:poll.10s="pollActiveRound" class="d-none"></div>
+    @else
+        <div wire:poll.15s="pollActiveRound" class="d-none"></div>
     @endif
 
     @if($errors->has('pick'))
@@ -25,7 +30,7 @@
         <p class="mb-1"><strong>Your Picks This Round:</strong> {{ $teamRoundPicksCount }} / {{ $activeRound->picks_per_team }}</p>
         <p class="mb-3">
             <strong>Time Remaining:</strong>
-            <span><span x-text="`${formatTime(remaining)} / ${formatTime(total)}`"></span></span>
+            <span wire:ignore><span x-text="`${formatTime(remaining)} / ${formatTime(total)}`"></span></span>
             <span class="badge bg-warning text-dark ms-1" x-show="isPaused" style="{{ ($activeRound && $activeRound->is_paused) ? '' : 'display: none;' }}"><i class="bi bi-pause-fill"></i> PAUSED</span>
         </p>
 

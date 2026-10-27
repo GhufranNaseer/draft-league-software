@@ -73,7 +73,7 @@ class AuthController extends Controller
         Auth::logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();
-        
+
         return redirect('/');
     }
 
@@ -94,7 +94,7 @@ class AuthController extends Controller
         /** @var User|null $user */
         $user = Auth::user();
 
-        if (!$user || !$user->isAdmin()) {
+        if (! $user || ! $user->isAdmin()) {
             return response()->json(['error' => 'Unauthorized'], 403);
         }
 
@@ -121,7 +121,7 @@ class AuthController extends Controller
      */
     public static function resolveHomeRoute(?User $user): string
     {
-        if (!$user) {
+        if (! $user) {
             return 'login';
         }
 
@@ -159,7 +159,7 @@ class AuthController extends Controller
         }
 
         $rawPath = parse_url($url, PHP_URL_PATH);
-        $path = ($rawPath === null || $rawPath === '' || $rawPath === '/') ? '/' : ('/' . ltrim($rawPath, '/'));
+        $path = ($rawPath === null || $rawPath === '' || $rawPath === '/') ? '/' : ('/'.ltrim($rawPath, '/'));
 
         // Never redirect authenticated users to public registration, login, logout, or submission endpoints
         if (in_array($path, ['/', '/login', '/logout', '/submit-form']) || Str::startsWith($path, '/status')) {
@@ -167,17 +167,17 @@ class AuthController extends Controller
         }
 
         // Admin-only areas
-        if (Str::startsWith($path, '/admin') && !$user->isAdmin()) {
+        if (Str::startsWith($path, '/admin') && ! $user->isAdmin()) {
             return false;
         }
 
         // Team areas
-        if (Str::startsWith($path, '/team') && !$user->isAdmin() && !$user->hasRole('team') && !Team::query()->whereRaw('LOWER(email) = ?', [strtolower((string) $user->email)])->exists()) {
+        if (Str::startsWith($path, '/team') && ! $user->isAdmin() && ! $user->hasRole('team') && ! Team::query()->whereRaw('LOWER(email) = ?', [strtolower((string) $user->email)])->exists()) {
             return false;
         }
 
         // Player areas
-        if (Str::startsWith($path, '/player') && !$user->isAdmin() && !$user->hasRole('player') && !Participant::query()->whereRaw('LOWER(email) = ?', [strtolower((string) $user->email)])->exists()) {
+        if (Str::startsWith($path, '/player') && ! $user->isAdmin() && ! $user->hasRole('player') && ! Participant::query()->whereRaw('LOWER(email) = ?', [strtolower((string) $user->email)])->exists()) {
             return false;
         }
 
