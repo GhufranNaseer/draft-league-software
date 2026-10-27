@@ -30,7 +30,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
-          extensions: bcmath, exif, gd, intl, mbstring, opcache, pcntl, pdo_mysql, pdo_sqlite, zip, redis
+          extensions: bcmath, exif, gd, intl, mbstring, opcache, pcntl, pdo_mysql, pdo_sqlite, sqlite3, zip, redis
           coverage: none
 
       - name: Cache Composer Dependencies
@@ -46,9 +46,10 @@ jobs:
       - name: Run Pint Code Style Check
         run: vendor/bin/pint --test
 
-      - name: Run Test Suite
+      - name: Setup Application Key & Run Tests
         run: |
-          php artisan key:generate --env=testing
+          cp .env.example .env
+          php artisan key:generate
           php artisan test --compact
 
   build-and-deploy:
