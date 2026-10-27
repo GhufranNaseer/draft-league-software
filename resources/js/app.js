@@ -1,2 +1,2 @@
-import './bootstrap';
 import './draft-timer';
+import './bootstrap';

@@ -52,6 +52,11 @@ jobs:
           cache: 'npm'
 
       - name: Install NPM Dependencies & Build Assets
+        env:
+          VITE_REVERB_APP_KEY: a72b9a889ce750021073505e9d882468
+          VITE_REVERB_HOST: 184.168.125.171
+          VITE_REVERB_PORT: 8443
+          VITE_REVERB_SCHEME: https
         run: |
           npm ci
           npm run build
