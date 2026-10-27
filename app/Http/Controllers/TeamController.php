@@ -754,16 +754,35 @@ class TeamController extends Controller
      */
     public function destroy(Team $team)
     {
-        Participant::where('team_id', $team->id)->update([
-            'team_id' => null,
-            'drafted_at' => null,
-        ]);
+        DB::transaction(function () use ($team) {
+            Participant::where('team_id', $team->id)->update([
+                'team_id' => null,
+                'drafted_at' => null,
+            ]);
 
-        if ($team->logo && Storage::disk('public')->exists($team->logo)) {
-            Storage::disk('public')->delete($team->logo);
-        }
+            if ($team->logo && Storage::disk('public')->exists($team->logo)) {
+                Storage::disk('public')->delete($team->logo);
+            }
 
-        $team->delete();
+            if ($team->email) {
+                $teamUser = User::where('email', $team->email)->first();
+                if ($teamUser && ! $teamUser->isAdmin()) {
+                    $teamUser->delete();
+                }
+            }
+
+            $configs = LeagueRoundConfig::where('league_type', $team->league_type)->get();
+            foreach ($configs as $config) {
+                $order = collect($config->team_pick_order)
+                    ->map(fn ($id) => (int) $id)
+                    ->filter(fn ($id) => $id !== (int) $team->id)
+                    ->values()
+                    ->all();
+                $config->update(['team_pick_order' => $order]);
+            }
+
+            $team->delete();
+        });
 
         return back()->with('success', 'Team deleted and drafted players returned to the draft pool.');
     }

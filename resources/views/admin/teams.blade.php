@@ -17,6 +17,7 @@
     <link rel="stylesheet" href="{{ asset('assets/css/admin-teams.css') }}">
     <link rel="stylesheet" href="{{ asset('assets/css/navbar.css') }}">
     @vite(['resources/js/app.js'])
+    <script src="{{ asset('assets/js/draft-timer.js') }}"></script>
     @livewireStyles
 </head>
 <body>

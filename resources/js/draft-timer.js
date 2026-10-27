@@ -471,7 +471,7 @@ if (typeof window !== 'undefined') {
 }
 
 // Alpine Component Definition
-export function ktplDraftTimerComponent() {
+function ktplDraftTimerComponent() {
     const initialState = window.__ktplDraftTimer ? window.__ktplDraftTimer.getState() : {
         remaining: 0,
         total: 60,
@@ -547,3 +547,5 @@ if (typeof window !== 'undefined') {
         });
     }
 }
+
+export { ktplDraftTimerComponent };

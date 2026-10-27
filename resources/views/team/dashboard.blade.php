@@ -16,6 +16,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
     <link rel="stylesheet" href="{{ asset('assets/css/navbar.css') }}">
     @vite(['resources/js/app.js'])
+    <script src="{{ asset('assets/js/draft-timer.js') }}"></script>
     @livewireStyles
 </head>
 <body class="bg-light">
