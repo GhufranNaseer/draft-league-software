@@ -174,17 +174,24 @@ mkdir -p storage/framework/{sessions,views,cache} storage/logs bootstrap/cache
 chmod -R 775 storage bootstrap/cache || true
 
 # ------------------------------------------------------------------------------
-# 6. Laravel Cache & Optimization Lifecycle
+# 6. Database Migrations
+# ------------------------------------------------------------------------------
+log_info "Running pending database migrations..."
+docker exec "$APP_CONTAINER" php artisan migrate --force
+
+# ------------------------------------------------------------------------------
+# 7. Laravel Cache & Optimization Lifecycle
 # ------------------------------------------------------------------------------
 log_info "Rebuilding Laravel production caches..."
 docker exec "$APP_CONTAINER" php artisan optimize:clear
 docker exec "$APP_CONTAINER" php artisan config:cache
 docker exec "$APP_CONTAINER" php artisan route:cache
 docker exec "$APP_CONTAINER" php artisan view:cache
+docker exec "$APP_CONTAINER" php artisan storage:link || true
 log_success "Laravel caches compiled successfully."
 
 # ------------------------------------------------------------------------------
-# 7. Background Services & Container Reload
+# 8. Background Services & Container Reload
 # ------------------------------------------------------------------------------
 log_info "Restarting background queue and Reverb WebSocket services..."
 docker restart "$QUEUE_CONTAINER"
@@ -196,6 +203,12 @@ docker restart "$APP_CONTAINER"
 log_info "Testing and reloading container Nginx..."
 docker exec "$NGINX_CONTAINER" nginx -t
 docker exec "$NGINX_CONTAINER" nginx -s reload
+
+# ------------------------------------------------------------------------------
+# 9. Docker Housekeeping (Clean dangling images)
+# ------------------------------------------------------------------------------
+log_info "Cleaning up unused dangling Docker images..."
+docker image prune -f || true
 
 # ------------------------------------------------------------------------------
 # 8. Post-Deployment Health Verification
