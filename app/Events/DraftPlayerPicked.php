@@ -24,9 +24,11 @@ class DraftPlayerPicked implements ShouldBroadcastNow, ShouldDispatchAfterCommit
 
     public int $pickNumber;
 
-    public ?string $pickedAt;
+    public ?int $teamId;
 
     public ?string $teamName;
+
+    public ?string $teamLogoUrl;
 
     public array $player;
 
@@ -53,13 +55,20 @@ class DraftPlayerPicked implements ShouldBroadcastNow, ShouldDispatchAfterCommit
             $passportUrl = asset('storage/'.ltrim($participant->passport_picture, '/'));
         }
 
+        $teamLogoUrl = null;
+        if ($pick->team?->logo) {
+            $teamLogoUrl = asset('storage/'.ltrim($pick->team->logo, '/'));
+        }
+
         $this->pickId = (int) $pick->id;
         $this->roundId = (int) $pick->draft_round_id;
         $this->roundNumber = (int) ($pick->round?->round_number ?: $pick->draft_round_id);
         $this->leagueType = (string) ($pick->round?->league_type ?? 'male');
         $this->pickNumber = (int) $pick->pick_number;
         $this->pickedAt = $pick->picked_at?->toIso8601String();
+        $this->teamId = $pick->team_id ? (int) $pick->team_id : null;
         $this->teamName = $pick->team?->name ?? '—';
+        $this->teamLogoUrl = $teamLogoUrl;
 
         $this->player = [
             'id' => (int) ($participant?->id ?? 0),
@@ -115,7 +124,9 @@ class DraftPlayerPicked implements ShouldBroadcastNow, ShouldDispatchAfterCommit
             'leagueType' => $this->leagueType,
             'pickNumber' => $this->pickNumber,
             'pickedAt' => $this->pickedAt,
+            'teamId' => $this->teamId,
             'teamName' => $this->teamName,
+            'teamLogoUrl' => $this->teamLogoUrl,
             'player' => $this->player,
             'serverTime' => $this->serverTime,
             'serverTimeMs' => $this->serverTimeMs,

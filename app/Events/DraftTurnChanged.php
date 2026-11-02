@@ -38,6 +38,10 @@ class DraftTurnChanged implements ShouldBroadcastNow, ShouldDispatchAfterCommit
 
     public bool $isPaused;
 
+    public bool $isWaitingForAdmin;
+
+    public string $state;
+
     public bool $isRunningTurn;
 
     public ?int $remainingTurnSeconds;
@@ -48,16 +52,38 @@ class DraftTurnChanged implements ShouldBroadcastNow, ShouldDispatchAfterCommit
 
     public int $serverTimeMs;
 
-    public int $stateVersion;
+    public ?array $skippedPick;
 
-    public function __construct(DraftRound $round, ?string $message = null)
+    public ?array $latestSkip;
+
+    public ?string $categoryName = null;
+
+    public function __construct(DraftRound $round, ?string $message = null, ?array $skippedPick = null)
     {
-        $round->loadMissing('currentTeam');
+        $round->loadMissing(['currentTeam', 'skips.team', 'category']);
+        $this->categoryName = $round->category?->name ?? 'DRAFT';
 
         $now = now();
         $this->serverTime = $now->toIso8601String();
         $this->serverTimeMs = (int) round(microtime(true) * 1000);
         $this->stateVersion = $this->serverTimeMs;
+
+        $this->isWaitingForAdmin = (bool) $round->is_waiting_for_admin;
+        $this->state = method_exists($round, 'getCurrentState') ? $round->getCurrentState() : ($round->is_waiting_for_admin ? 'skipped_waiting_for_admin' : ($round->is_paused ? 'paused' : 'active'));
+
+        $this->skippedPick = $skippedPick;
+        if ($this->skippedPick) {
+            $this->latestSkip = $this->skippedPick;
+        } else {
+            $lastSkip = $round->skips()->with('team')->latest('id')->first();
+            $this->latestSkip = $lastSkip ? [
+                'teamName' => $lastSkip->team?->name ?? 'Unknown Team',
+                'roundNumber' => (int) $lastSkip->round_number,
+                'pickNumber' => (int) $lastSkip->pick_number,
+                'skippedAt' => $lastSkip->skipped_at?->toIso8601String() ?? $lastSkip->created_at?->toIso8601String(),
+                'displayText' => "{$lastSkip->team?->name} | Round {$lastSkip->round_number} | Pick {$lastSkip->pick_number} SKIPPED",
+            ] : null;
+        }
 
         $this->roundId = (int) $round->id;
         $this->roundNumber = (int) ($round->round_number ?: $round->id);
@@ -72,7 +98,11 @@ class DraftTurnChanged implements ShouldBroadcastNow, ShouldDispatchAfterCommit
         $this->turnStartedAtMs = $round->current_turn_started_at ? (int) $round->current_turn_started_at->getTimestampMs() : null;
         $this->turnTimeSeconds = (int) $round->turn_time_seconds;
         $this->isPaused = (bool) $round->is_paused;
-        if ($this->isPaused) {
+        if ($this->isWaitingForAdmin) {
+            $this->remainingTurnSeconds = 0;
+            $this->isRunningTurn = false;
+            $this->isPaused = true;
+        } elseif ($this->isPaused) {
             $this->remainingTurnSeconds = $round->remaining_turn_seconds !== null ? (int) $round->remaining_turn_seconds : (int) $round->turn_time_seconds;
             $this->isRunningTurn = false;
         } elseif ($round->current_turn_started_at) {
@@ -140,17 +170,22 @@ class DraftTurnChanged implements ShouldBroadcastNow, ShouldDispatchAfterCommit
             'currentPickNumber' => $this->currentPickNumber,
             'totalPicksPlanned' => $this->totalPicksPlanned,
             'status' => $this->status,
+            'categoryName' => $this->categoryName,
             'message' => $this->message,
             'turnStartedAt' => $this->turnStartedAt,
             'turnStartedAtMs' => $this->turnStartedAtMs,
             'turnTimeSeconds' => $this->turnTimeSeconds,
             'isPaused' => $this->isPaused,
+            'isWaitingForAdmin' => $this->isWaitingForAdmin,
+            'state' => $this->state,
             'isRunningTurn' => $this->isRunningTurn,
             'remainingTurnSeconds' => $this->remainingTurnSeconds,
             'remainingSeconds' => $this->remainingTurnSeconds,
             'serverTime' => $this->serverTime,
             'serverTimeMs' => $this->serverTimeMs,
             'stateVersion' => $this->stateVersion,
+            'skippedPick' => $this->skippedPick,
+            'latestSkip' => $this->latestSkip,
         ];
     }
 }

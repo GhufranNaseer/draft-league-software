@@ -6,9 +6,11 @@ use App\Events\DraftPlayerPicked;
 use App\Events\DraftTurnChanged;
 use App\Models\DraftPick;
 use App\Models\DraftRound;
+use App\Models\DraftSkip;
 use App\Models\League;
 use App\Models\Participant;
 use App\Models\Team;
+use Illuminate\Broadcasting\BroadcastException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -82,12 +84,12 @@ class DraftService
         return $order[$nextIndex] ?? null;
     }
 
-    public function broadcastTurnChanged(DraftRound $round, ?string $message = null): void
+    public function broadcastTurnChanged(DraftRound $round, ?string $message = null, ?array $skippedPick = null): void
     {
         $freshRound = $round->fresh(['currentTeam']) ?? $round->loadMissing('currentTeam');
 
         try {
-            event(new DraftTurnChanged($freshRound, $message));
+            event(new DraftTurnChanged($freshRound, $message, $skippedPick));
         } catch (\Throwable $exception) {
             Log::warning('Draft turn broadcast failed.', [
                 'round_id' => (int) $freshRound->id,
@@ -115,115 +117,321 @@ class DraftService
     }
 
     /**
-     * Move turn to next eligible team or complete round if none remain.
-     * Returns true if the round advanced, false if it completed.
+     * Get the authoritative latest skipped pick for an active round or league.
+     * Single source of truth for all dashboards and screens.
+     *
+     * @return array{id: int, teamId: int, teamName: string, roundNumber: int, pickNumber: int, skippedAt: string|null, displayText: string}|null
      */
-    public function advanceTurnOrComplete(DraftRound $round): bool
+    public function getLatestSkip(string $leagueType, ?DraftRound $activeRound = null): ?array
+    {
+        $normalizedLeague = $this->normalizeLeagueType($leagueType);
+        $leagueVariants = [$normalizedLeague];
+        if ($normalizedLeague === 'male') {
+            $leagueVariants[] = 'males';
+        } elseif ($normalizedLeague === 'males') {
+            $leagueVariants[] = 'male';
+        } elseif ($normalizedLeague === 'female') {
+            $leagueVariants[] = 'females';
+        } elseif ($normalizedLeague === 'females') {
+            $leagueVariants[] = 'female';
+        }
+
+        $skipRecord = null;
+        if ($activeRound && $activeRound->id) {
+            $skipRecord = $activeRound->skips()->with('team')->latest('id')->first();
+        }
+
+        if (! $skipRecord) {
+            $skipRecord = DraftSkip::query()
+                ->whereHas('round', fn ($q) => $q->whereIn('league_type', $leagueVariants))
+                ->with('team')
+                ->latest('id')
+                ->first();
+        }
+
+        if (! $skipRecord) {
+            return null;
+        }
+
+        $teamName = $skipRecord->team?->name ?? 'Unknown Team';
+        $roundNumber = (int) $skipRecord->round_number;
+        $pickNumber = (int) $skipRecord->pick_number;
+
+        return [
+            'id' => (int) $skipRecord->id,
+            'teamId' => (int) $skipRecord->team_id,
+            'teamName' => $teamName,
+            'roundNumber' => $roundNumber,
+            'pickNumber' => $pickNumber,
+            'skippedAt' => $skipRecord->skipped_at?->toIso8601String(),
+            'displayText' => "{$teamName} | Round {$roundNumber} | Pick {$pickNumber} SKIPPED",
+        ];
+    }
+
+    /**
+     * Handle turn expiry when countdown reaches zero without a player selection.
+     * Stops the timer at 0, records a DraftSkip, sets is_waiting_for_admin to true,
+     * and DOES NOT advance to the next team or start another countdown.
+     *
+     * @return array{id: int, teamId: int, teamName: string, roundNumber: int, pickNumber: int, skippedAt: string|null, displayText: string}|null
+     */
+    public function handleTurnExpiryWithoutPick(DraftRound $round): ?array
+    {
+        $broadcastMessage = null;
+        $updatedRound = null;
+        $skippedPickPayload = null;
+
+        DB::transaction(function () use ($round, &$broadcastMessage, &$updatedRound, &$skippedPickPayload) {
+            $lockedRound = DraftRound::query()->lockForUpdate()->findOrFail($round->id);
+
+            if ($lockedRound->status !== 'active') {
+                $updatedRound = $lockedRound;
+
+                return;
+            }
+
+            if ($lockedRound->is_waiting_for_admin) {
+                $updatedRound = $lockedRound->fresh(['currentTeam']);
+
+                return;
+            }
+
+            if (! $this->isTurnExpired($lockedRound)) {
+                $updatedRound = $lockedRound->fresh(['currentTeam']);
+
+                return;
+            }
+
+            $roundNumber = (int) ($lockedRound->round_number ?: $lockedRound->id);
+            $pickNumber = (int) $lockedRound->current_pick_number;
+            $expiringTeamId = (int) $lockedRound->current_team_id;
+
+            $skipRecord = DraftSkip::firstOrCreate(
+                [
+                    'draft_round_id' => $lockedRound->id,
+                    'pick_number' => $pickNumber,
+                ],
+                [
+                    'team_id' => $expiringTeamId,
+                    'round_number' => $roundNumber,
+                    'skipped_at' => now(),
+                ]
+            );
+
+            $expiringTeam = Team::query()->find($expiringTeamId);
+            $teamName = $expiringTeam?->name ?? 'Unknown Team';
+
+            $skippedPickPayload = [
+                'id' => (int) $skipRecord->id,
+                'teamId' => $expiringTeamId,
+                'teamName' => $teamName,
+                'roundNumber' => $roundNumber,
+                'pickNumber' => $pickNumber,
+                'skippedAt' => $skipRecord->skipped_at?->toIso8601String() ?? now()->toIso8601String(),
+                'displayText' => "{$teamName} | Round {$roundNumber} | Pick {$pickNumber} SKIPPED",
+            ];
+
+            // Stop timer at 0, keep current team identifiable, set waiting for admin
+            $lockedRound->update([
+                'is_paused' => true,
+                'is_waiting_for_admin' => true,
+                'remaining_turn_seconds' => 0,
+                'current_turn_started_at' => null,
+            ]);
+
+            $updatedRound = $lockedRound->fresh(['currentTeam']);
+            $broadcastMessage = "{$teamName} missed their turn. Round {$roundNumber} | Pick {$pickNumber} SKIPPED. Waiting for admin.";
+        });
+
+        if ($updatedRound && $broadcastMessage) {
+            $this->broadcastTurnChanged($updatedRound, $broadcastMessage, $skippedPickPayload);
+        }
+
+        return $skippedPickPayload;
+    }
+
+    /**
+     * Admin action to transition from a skipped turn to the next team's fresh countdown.
+     * Advances to the next eligible team, resets countdown to the full configured duration,
+     * leaves the timer stopped/paused, and clears the waiting-for-admin state.
+     */
+    public function showTimer(DraftRound $round): DraftRound
     {
         $broadcastMessage = null;
         $updatedRound = null;
 
-        $advanced = DB::transaction(function () use ($round, &$broadcastMessage, &$updatedRound) {
-            $nextTeamId = $this->findNextTeamId($round);
+        DB::transaction(function () use ($round, &$broadcastMessage, &$updatedRound) {
+            $lockedRound = DraftRound::query()->lockForUpdate()->findOrFail($round->id);
 
-            if ($nextTeamId === null) {
-                $round->update([
-                    'status' => 'completed',
-                    'completed_at' => now(),
-                    'current_turn_started_at' => null,
-                ]);
+            if ($lockedRound->status !== 'active') {
+                $updatedRound = $lockedRound;
 
-                $broadcastMessage = 'Turn expired and the round has been completed.';
-                $updatedRound = $round->fresh(['currentTeam']);
-
-                return false;
+                return;
             }
 
-            $round->update([
+            // Concurrency guard: if not waiting for admin, ignore to prevent duplicate click advancements
+            if (! $lockedRound->is_waiting_for_admin) {
+                $updatedRound = $lockedRound->fresh(['currentTeam']);
+
+                return;
+            }
+
+            $nextTeamId = $this->findNextTeamId($lockedRound);
+
+            if ($nextTeamId === null) {
+                // Final pick was skipped and no more teams remain in pick order: complete round
+                $lockedRound->update([
+                    'status' => 'completed',
+                    'completed_at' => now(),
+                    'is_waiting_for_admin' => false,
+                    'is_paused' => false,
+                    'current_turn_started_at' => null,
+                    'remaining_turn_seconds' => null,
+                ]);
+
+                $updatedRound = $lockedRound->fresh(['currentTeam']);
+                $broadcastMessage = 'All draft picks completed. Draft round is finished.';
+
+                return;
+            }
+
+            // Advance to next eligible team/pick with fresh full duration, kept paused initially
+            $lockedRound->update([
                 'current_team_id' => $nextTeamId,
-                'current_pick_number' => (int) $round->current_pick_number + 1,
-                'current_turn_started_at' => now(),
-                'is_paused' => false,
-                'remaining_turn_seconds' => null,
+                'current_pick_number' => (int) $lockedRound->current_pick_number + 1,
+                'current_turn_started_at' => null,
+                'is_paused' => true,
+                'is_waiting_for_admin' => false,
+                'remaining_turn_seconds' => (int) $lockedRound->turn_time_seconds,
             ]);
 
-            $updatedRound = $round->fresh(['currentTeam']);
-            $broadcastMessage = ($updatedRound->currentTeam?->name ?? 'The next team').' is now on the clock.';
-
-            return true;
+            $updatedRound = $lockedRound->fresh(['currentTeam']);
+            $nextTeamName = $updatedRound->currentTeam?->name ?? 'Next team';
+            $broadcastMessage = "{$nextTeamName} is now on the clock (paused). Ready for admin to start timer.";
         });
 
         if ($updatedRound && $broadcastMessage) {
             $this->broadcastTurnChanged($updatedRound, $broadcastMessage);
         }
 
-        return $advanced;
+        return $updatedRound;
     }
 
     /**
-     * Check turn expiry and advance if expired.
+     * Move turn to next eligible team or complete round if none remain.
+     * Records a skip and completes round or advances.
+     */
+    public function advanceTurnOrComplete(DraftRound $round): bool
+    {
+        $this->handleTurnExpiryWithoutPick($round);
+        $fresh = $round->fresh();
+        if ($fresh && $fresh->is_waiting_for_admin) {
+            $updated = $this->showTimer($fresh);
+
+            return $updated->status === 'active';
+        }
+
+        return false;
+    }
+
+    /**
+     * Check turn expiry and handle expiration if reached.
      *
-     * @return array{advanced: bool, round_closed: bool, currentTeamId: int|null, currentTurnStartedAtTs: int|null, turnTimeSeconds: int}
+     * @return array{advanced: bool, round_closed: bool, is_waiting_for_admin: bool, currentTeamId: int|null, currentTurnStartedAtTs: int|null, turnTimeSeconds: int}
      */
     public function tick(DraftRound $round): array
     {
-        return DB::transaction(function () use ($round) {
-            $locked = DraftRound::query()->lockForUpdate()->findOrFail($round->id);
+        try {
+            $current = DraftRound::query()->find($round->id);
 
-            if ($locked->status !== 'active') {
+            if (! $current || $current->status !== 'active') {
                 return [
                     'advanced' => false,
                     'round_closed' => true,
-                    'currentTeamId' => $locked->current_team_id ? (int) $locked->current_team_id : null,
-                    'currentTurnStartedAtTs' => $locked->current_turn_started_at?->timestamp,
-                    'turnTimeSeconds' => (int) $locked->turn_time_seconds,
+                    'is_waiting_for_admin' => false,
+                    'currentTeamId' => $current?->current_team_id ? (int) $current->current_team_id : null,
+                    'currentTurnStartedAtTs' => $current?->current_turn_started_at?->timestamp,
+                    'turnTimeSeconds' => (int) ($current?->turn_time_seconds ?? 60),
                 ];
             }
 
-            if ($locked->is_paused) {
+            // If already waiting for admin, do not tick or advance
+            if ($current->is_waiting_for_admin) {
                 return [
                     'advanced' => false,
                     'round_closed' => false,
-                    'currentTeamId' => $locked->current_team_id ? (int) $locked->current_team_id : null,
-                    'currentTurnStartedAtTs' => $locked->current_turn_started_at?->timestamp,
-                    'turnTimeSeconds' => (int) $locked->turn_time_seconds,
+                    'is_waiting_for_admin' => true,
+                    'currentTeamId' => $current->current_team_id ? (int) $current->current_team_id : null,
+                    'currentTurnStartedAtTs' => null,
+                    'turnTimeSeconds' => (int) $current->turn_time_seconds,
                 ];
             }
 
-            if (! $locked->current_turn_started_at) {
-                $locked->update(['current_turn_started_at' => now()]);
-                $locked->refresh();
+            if ($current->is_paused) {
+                return [
+                    'advanced' => false,
+                    'round_closed' => false,
+                    'is_waiting_for_admin' => false,
+                    'currentTeamId' => $current->current_team_id ? (int) $current->current_team_id : null,
+                    'currentTurnStartedAtTs' => $current->current_turn_started_at?->timestamp,
+                    'turnTimeSeconds' => (int) $current->turn_time_seconds,
+                ];
+            }
+
+            if (! $current->current_turn_started_at) {
+                $current->update(['current_turn_started_at' => now()]);
+                $current->refresh();
 
                 return [
                     'advanced' => false,
                     'round_closed' => false,
-                    'currentTeamId' => $locked->current_team_id ? (int) $locked->current_team_id : null,
-                    'currentTurnStartedAtTs' => $locked->current_turn_started_at?->timestamp,
-                    'turnTimeSeconds' => (int) $locked->turn_time_seconds,
+                    'is_waiting_for_admin' => false,
+                    'currentTeamId' => $current->current_team_id ? (int) $current->current_team_id : null,
+                    'currentTurnStartedAtTs' => $current->current_turn_started_at?->timestamp,
+                    'turnTimeSeconds' => (int) $current->turn_time_seconds,
                 ];
             }
 
-            if (! $this->isTurnExpired($locked)) {
+            if (! $this->isTurnExpired($current)) {
                 return [
                     'advanced' => false,
                     'round_closed' => false,
-                    'currentTeamId' => $locked->current_team_id ? (int) $locked->current_team_id : null,
-                    'currentTurnStartedAtTs' => $locked->current_turn_started_at?->timestamp,
-                    'turnTimeSeconds' => (int) $locked->turn_time_seconds,
+                    'is_waiting_for_admin' => false,
+                    'currentTeamId' => $current->current_team_id ? (int) $current->current_team_id : null,
+                    'currentTurnStartedAtTs' => $current->current_turn_started_at?->timestamp,
+                    'turnTimeSeconds' => (int) $current->turn_time_seconds,
                 ];
             }
 
-            $advanced = $this->advanceTurnOrComplete($locked);
-            $locked->refresh();
+            // Expiry without player selection: record skip, pause at 0, wait for admin
+            $skippedPick = $this->handleTurnExpiryWithoutPick($current);
 
             return [
-                'advanced' => $advanced,
-                'round_closed' => ! $advanced,
-                'currentTeamId' => $locked->current_team_id ? (int) $locked->current_team_id : null,
-                'currentTurnStartedAtTs' => $locked->current_turn_started_at?->timestamp,
-                'turnTimeSeconds' => (int) $locked->turn_time_seconds,
+                'advanced' => false,
+                'round_closed' => false,
+                'is_waiting_for_admin' => true,
+                'skipped_pick' => $skippedPick,
+                'currentTeamId' => $current->current_team_id ? (int) $current->current_team_id : null,
+                'currentTurnStartedAtTs' => null,
+                'turnTimeSeconds' => (int) $current->turn_time_seconds,
             ];
-        });
+        } catch (BroadcastException $exception) {
+            Log::warning('Draft broadcast exception caught in DraftService::tick: '.$exception->getMessage(), [
+                'round_id' => (int) $round->id,
+                'error' => $exception->getMessage(),
+            ]);
+
+            $fresh = $round->fresh();
+
+            return [
+                'advanced' => false,
+                'round_closed' => ($fresh?->status === 'completed'),
+                'is_waiting_for_admin' => (bool) ($fresh?->is_waiting_for_admin ?? false),
+                'currentTeamId' => $fresh?->current_team_id ? (int) $fresh->current_team_id : null,
+                'currentTurnStartedAtTs' => $fresh?->current_turn_started_at?->timestamp,
+                'turnTimeSeconds' => (int) ($fresh?->turn_time_seconds ?? 60),
+            ];
+        }
     }
 
     /**
@@ -234,7 +442,7 @@ class DraftService
         $updated = DB::transaction(function () use ($round) {
             $locked = DraftRound::query()->lockForUpdate()->findOrFail($round->id);
 
-            if ($locked->status !== 'active' || $locked->is_paused) {
+            if ($locked->status !== 'active' || $locked->is_paused || $locked->is_waiting_for_admin) {
                 return $locked;
             }
 
@@ -252,7 +460,7 @@ class DraftService
             return $locked->fresh(['currentTeam']);
         });
 
-        if ($updated->is_paused) {
+        if ($updated->is_paused && ! $updated->is_waiting_for_admin) {
             $this->broadcastTurnChanged($updated, 'Draft timer has been paused by admin.');
         }
 
@@ -267,7 +475,7 @@ class DraftService
         $updated = DB::transaction(function () use ($round) {
             $locked = DraftRound::query()->lockForUpdate()->findOrFail($round->id);
 
-            if ($locked->status !== 'active' || ! $locked->is_paused) {
+            if ($locked->status !== 'active' || ! $locked->is_paused || $locked->is_waiting_for_admin) {
                 return $locked;
             }
 
@@ -299,7 +507,7 @@ class DraftService
         $updated = DB::transaction(function () use ($round) {
             $locked = DraftRound::query()->lockForUpdate()->findOrFail($round->id);
 
-            if ($locked->status !== 'active') {
+            if ($locked->status !== 'active' || $locked->is_waiting_for_admin) {
                 return $locked;
             }
 
@@ -341,14 +549,18 @@ class DraftService
                 return ['error' => 'This draft round is already closed.'];
             }
 
+            if ($lockedRound->is_waiting_for_admin) {
+                return ['error' => 'Current turn was skipped. Admin must show timer before making picks.'];
+            }
+
             if ($lockedRound->is_paused) {
                 return ['error' => 'Draft is currently paused. Player picking is suspended until resumed.'];
             }
 
             if ($this->isTurnExpired($lockedRound)) {
-                $this->advanceTurnOrComplete($lockedRound);
+                $this->handleTurnExpiryWithoutPick($lockedRound);
 
-                return ['error' => 'Turn time expired. Turn has been auto-skipped to the next team.'];
+                return ['error' => 'Turn time expired. Turn has been skipped. Admin must show timer to continue.'];
             }
 
             $lockedParticipant = Participant::query()->lockForUpdate()->findOrFail($participant->id);
