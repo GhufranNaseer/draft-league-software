@@ -68,11 +68,15 @@
                             </button>
                         @else
                             @if($activeRound->is_paused)
-                                <button class="btn btn-sm btn-success" wire:click="resumeRound({{ $activeRound->id }})" wire:loading.attr="disabled" type="button">
+                                <button class="btn btn-sm btn-success"
+                                    @click="isPaused = false; if (window.__ktplDraftTimer) { window.__ktplDraftTimer.isPaused = false; window.__ktplDraftTimer.startTicker(); window.__ktplDraftTimer.notify(); }"
+                                    wire:click="resumeRound({{ $activeRound->id }})" wire:loading.attr="disabled" type="button">
                                     <i class="bi bi-play-fill"></i> <span wire:loading.remove wire:target="resumeRound">Resume</span><span wire:loading wire:target="resumeRound">Resuming...</span>
                                 </button>
                             @else
-                                <button class="btn btn-sm btn-warning text-dark" wire:click="pauseRound({{ $activeRound->id }})" wire:loading.attr="disabled" type="button">
+                                <button class="btn btn-sm btn-warning text-dark"
+                                    @click="isPaused = true; if (window.__ktplDraftTimer) { window.__ktplDraftTimer.isPaused = true; window.__ktplDraftTimer.stopTicker(); window.__ktplDraftTimer.notify(); }"
+                                    wire:click="pauseRound({{ $activeRound->id }})" wire:loading.attr="disabled" type="button">
                                     <i class="bi bi-pause-fill"></i> <span wire:loading.remove wire:target="pauseRound">Pause</span><span wire:loading wire:target="pauseRound">Pausing...</span>
                                 </button>
                             @endif
