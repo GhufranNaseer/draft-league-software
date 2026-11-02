@@ -19,17 +19,18 @@ const host = (typeof window !== 'undefined' && window.location.hostname)
     : (getMeta('reverb-host') || import.meta.env.VITE_REVERB_HOST || '127.0.0.1');
 
 const isHttps = (typeof window !== 'undefined' && window.location.protocol === 'https:');
-const defaultPort = isHttps ? 443 : 80;
+const windowPort = (typeof window !== 'undefined' && window.location.port) ? parseInt(window.location.port, 10) : null;
+const defaultPort = windowPort || (isHttps ? 443 : 80);
 const metaPort = getMeta('reverb-port');
 const envPort = import.meta.env.VITE_REVERB_PORT;
 
 let currentPort;
-if (metaPort && parseInt(metaPort, 10)) {
+if (windowPort) {
+    currentPort = windowPort;
+} else if (metaPort && parseInt(metaPort, 10) && parseInt(metaPort, 10) !== 8080) {
     currentPort = parseInt(metaPort, 10);
 } else if (envPort && parseInt(envPort, 10)) {
     currentPort = parseInt(envPort, 10);
-} else if (typeof window !== 'undefined' && window.location.port) {
-    currentPort = parseInt(window.location.port, 10);
 } else {
     currentPort = defaultPort;
 }
