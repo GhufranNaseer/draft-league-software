@@ -247,7 +247,7 @@ class DraftBoard extends Component
             ->with('category')
             ->whereIn('league_type', $leagueVariants)
             ->latest('id')
-            ->first();
+            ->first() ?? DraftRound::query()->with('category')->latest('id')->first();
 
         $payload = [
             'roundNumber' => (int) ($round?->round_number ?: $round?->id ?: 1),
