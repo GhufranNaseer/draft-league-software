@@ -129,7 +129,9 @@ class AuthController extends Controller
             return 'admin.dashboard';
         }
 
-        if ($user->hasRole('team') || Team::query()->whereRaw('LOWER(email) = ?', [strtolower((string) $user->email)])->exists()) {
+        if ($user->hasRole('team')
+            || Team::query()->whereRaw('LOWER(email) = ?', [strtolower((string) $user->email)])->exists()
+            || Team::query()->whereRaw('LOWER(name) = ?', [strtolower((string) $user->name)])->exists()) {
             return 'team.dashboard';
         }
 
@@ -172,7 +174,7 @@ class AuthController extends Controller
         }
 
         // Team areas
-        if (Str::startsWith($path, '/team') && ! $user->isAdmin() && ! $user->hasRole('team') && ! Team::query()->whereRaw('LOWER(email) = ?', [strtolower((string) $user->email)])->exists()) {
+        if (Str::startsWith($path, '/team') && ! $user->isAdmin() && ! $user->hasRole('team') && ! Team::query()->whereRaw('LOWER(email) = ?', [strtolower((string) $user->email)])->exists() && ! Team::query()->whereRaw('LOWER(name) = ?', [strtolower((string) $user->name)])->exists()) {
             return false;
         }
 

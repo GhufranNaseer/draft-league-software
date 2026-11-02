@@ -592,15 +592,24 @@ class TicketRequirementsTest extends TestCase
         $this->assertTrue($draftService->isTurnExpired($round));
 
         $tickResult = $draftService->tick($round);
-        $this->assertTrue($tickResult['advanced']);
+        $this->assertFalse($tickResult['advanced']);
+        $this->assertTrue($tickResult['is_waiting_for_admin']);
 
+        $round->refresh();
+        $this->assertEquals(1, $round->current_pick_number);
+        $this->assertEquals($team1->id, $round->current_team_id);
+        $this->assertTrue($round->is_paused);
+        $this->assertTrue($round->is_waiting_for_admin);
+        $this->assertEquals(0, $round->remaining_turn_seconds);
+
+        // When admin clicks SHOW TIMER, it advances to next team with full duration paused
+        $draftService->showTimer($round);
         $round->refresh();
         $this->assertEquals(2, $round->current_pick_number);
         $this->assertEquals($team2->id, $round->current_team_id);
-        $this->assertFalse($round->is_paused);
-        $this->assertNull($round->remaining_turn_seconds);
-        // Turn timer reset to now
-        $this->assertLessThanOrEqual(2, abs(Carbon::now()->diffInSeconds($round->current_turn_started_at)));
+        $this->assertTrue($round->is_paused);
+        $this->assertFalse($round->is_waiting_for_admin);
+        $this->assertEquals(60, $round->remaining_turn_seconds);
     }
 
     public function test_running_round_calculates_monotonically_decreasing_remaining_seconds(): void

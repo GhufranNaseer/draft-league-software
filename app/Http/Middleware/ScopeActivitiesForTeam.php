@@ -26,6 +26,8 @@ class ScopeActivitiesForTeam
 
         $linkedTeamId = Team::query()
             ->whereRaw('LOWER(email) = ?', [strtolower((string) $user->email)])
+            ->value('id') ?? Team::query()
+            ->whereRaw('LOWER(name) = ?', [strtolower((string) $user->name)])
             ->value('id');
 
         if (! $linkedTeamId) {
