@@ -22,6 +22,7 @@ class DraftRound extends Model
         'completed_at',
         'status',
         'is_paused',
+        'is_waiting_for_admin',
         'remaining_turn_seconds',
     ];
 
@@ -32,8 +33,26 @@ class DraftRound extends Model
         'current_turn_started_at' => 'datetime',
         'completed_at' => 'datetime',
         'is_paused' => 'boolean',
+        'is_waiting_for_admin' => 'boolean',
         'remaining_turn_seconds' => 'integer',
     ];
+
+    public function getCurrentState(): string
+    {
+        if ($this->status === 'completed') {
+            return 'completed';
+        }
+
+        if ($this->is_waiting_for_admin) {
+            return 'skipped_waiting_for_admin';
+        }
+
+        if ($this->is_paused) {
+            return 'paused';
+        }
+
+        return 'active';
+    }
 
     public function category()
     {
@@ -53,5 +72,10 @@ class DraftRound extends Model
     public function picks()
     {
         return $this->hasMany(DraftPick::class);
+    }
+
+    public function skips()
+    {
+        return $this->hasMany(DraftSkip::class);
     }
 }
