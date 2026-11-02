@@ -167,20 +167,30 @@ MANIFEST_COUNT=$(grep -c 'file' public/build/manifest.json || true)
 log_success "Frontend manifest verified ($MANIFEST_COUNT entries found)."
 
 # ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # 5. File Permissions & Directory Setup
 # ------------------------------------------------------------------------------
-log_info "Verifying storage and cache permissions..."
+log_info "Verifying storage, env, and cache permissions..."
+if [ ! -f ".env" ] && [ -f ".env.production" ]; then
+    ln -sf .env.production .env
+fi
 mkdir -p storage/framework/{sessions,views,cache} storage/logs bootstrap/cache
 chmod -R 775 storage bootstrap/cache || true
 
 # ------------------------------------------------------------------------------
-# 6. Database Migrations
+# 6. Container Updates & Mounts
+# ------------------------------------------------------------------------------
+log_info "Updating Docker services with compose file..."
+docker compose --env-file .env.production -f "$COMPOSE_FILE" up -d --remove-orphans 2>/dev/null || docker compose -f "$COMPOSE_FILE" up -d --remove-orphans 2>/dev/null || docker-compose -f "$COMPOSE_FILE" up -d --remove-orphans 2>/dev/null || true
+
+# ------------------------------------------------------------------------------
+# 7. Database Migrations
 # ------------------------------------------------------------------------------
 log_info "Running pending database migrations..."
 docker exec "$APP_CONTAINER" php artisan migrate --force
 
 # ------------------------------------------------------------------------------
-# 7. Laravel Cache & Optimization Lifecycle
+# 8. Laravel Cache & Optimization Lifecycle
 # ------------------------------------------------------------------------------
 log_info "Rebuilding Laravel production caches..."
 docker exec "$APP_CONTAINER" php artisan optimize:clear
@@ -191,14 +201,11 @@ docker exec "$APP_CONTAINER" php artisan storage:link || true
 log_success "Laravel caches compiled successfully."
 
 # ------------------------------------------------------------------------------
-# 8. Background Services & Container Reload
+# 9. Background Services & Container Reload
 # ------------------------------------------------------------------------------
 log_info "Synchronizing public images into containers..."
 docker cp public/images/. "$NGINX_CONTAINER":/var/www/html/public/images/ 2>/dev/null || true
 docker cp public/images/. "$APP_CONTAINER":/var/www/html/public/images/ 2>/dev/null || true
-
-log_info "Updating Docker services with compose file..."
-docker compose -f "$COMPOSE_FILE" up -d --remove-orphans 2>/dev/null || docker-compose -f "$COMPOSE_FILE" up -d --remove-orphans 2>/dev/null || true
 
 log_info "Restarting background queue and Reverb WebSocket services..."
 docker restart "$QUEUE_CONTAINER"
