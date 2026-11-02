@@ -140,7 +140,7 @@ class DraftTurnChanged implements ShouldBroadcastNow, ShouldDispatchAfterCommit
             'message' => $this->message,
         ]);
 
-        $channels = [new Channel($channel)];
+        $channels = [new Channel($channel), new Channel('draft.screen')];
         if ($this->leagueType === 'male') {
             $channels[] = new Channel('draft.league.males');
         } elseif ($this->leagueType === 'males') {
