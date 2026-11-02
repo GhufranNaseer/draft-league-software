@@ -47,22 +47,29 @@ if (key && key.trim() !== '') {
             wsPort: currentPort,
             wssPort: currentPort,
             forceTLS: useTLS,
-            enabledTransports: useTLS ? ['wss'] : ['ws'],
+            enabledTransports: ['ws', 'wss'],
+            disableStats: true,
         });
 
         if (window.Echo && window.Echo.connector && window.Echo.connector.pusher) {
             let consecutiveFailures = 0;
             const pusher = window.Echo.connector.pusher;
 
-            pusher.connection.bind('error', function () {
+            pusher.connection.bind('state_change', function (states) {
+                console.log(`[Echo] WebSocket state: ${states.previous} -> ${states.current}`);
+            });
+
+            pusher.connection.bind('error', function (err) {
                 consecutiveFailures++;
-                if (consecutiveFailures >= 4) {
-                    console.warn(`[Echo] WebSocket server unreachable at ${host}:${currentPort}. Paused reconnection to prevent console spam. Run 'php artisan reverb:start' if real-time WebSockets are needed.`);
+                console.warn(`[Echo] WebSocket connection attempt issue (${consecutiveFailures}/10):`, err);
+                if (consecutiveFailures >= 10) {
+                    console.warn(`[Echo] WebSocket server unreachable at ${host}:${currentPort}. Run 'php artisan reverb:start' if real-time WebSockets are needed.`);
                     pusher.disconnect();
                 }
             });
 
             pusher.connection.bind('connected', function () {
+                console.log(`[Echo] Connected to Reverb on ${useTLS ? 'wss' : 'ws'}://${host}:${currentPort}`);
                 consecutiveFailures = 0;
             });
         }
