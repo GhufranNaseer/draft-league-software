@@ -737,7 +737,6 @@
   @keyframes rcDot     { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
   @keyframes rcSweep   { 0% { opacity: 1; transform: translate3d(-400px,0,0) skewX(-18deg); } 100% { opacity: 1; transform: translate3d(1700px,0,0) skewX(-18deg); } }
 </style>
-@vite(['resources/js/app.js'])
 </head>
 <body>
 
