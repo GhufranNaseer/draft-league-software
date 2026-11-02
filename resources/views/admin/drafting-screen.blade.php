@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="csrf-token" content="{{ csrf_token() }}">
 <meta name="reverb-key" content="{{ config('broadcasting.connections.reverb.key') }}">
-<meta name="reverb-host" content="{{ config('broadcasting.connections.reverb.options.host') }}">
-<meta name="reverb-port" content="{{ config('broadcasting.connections.reverb.options.port') }}">
-<meta name="reverb-scheme" content="{{ config('broadcasting.connections.reverb.options.scheme') }}">
+<meta name="reverb-host" content="{{ env('VITE_REVERB_HOST', request()->getHost()) }}">
+<meta name="reverb-port" content="{{ env('VITE_REVERB_PORT', request()->getPort() ?: (request()->isSecure() ? 443 : 80)) }}">
+<meta name="reverb-scheme" content="{{ env('VITE_REVERB_SCHEME', request()->isSecure() ? 'https' : 'http') }}">
 <script>
     window.__REVERB_KEY__ = "{{ config('broadcasting.connections.reverb.key') }}";
 </script>
@@ -1995,6 +1995,10 @@
     // Immediately switch to Card View so the audience sees the picked player with neon star
     showCardView(pickData);
 
+    var isFromLeft = (pickTransitionCount % 2 === 1);
+    var content = $('playerCardContent');
+    var prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
     if (!prefersReducedMotion && content) {
       content.className = isFromLeft ? 'anim-enter-left' : 'anim-enter-right';
       void content.offsetWidth;
@@ -2031,7 +2035,10 @@
 
   /* ================= Real-Time Echo / Reverb Listener ================= */
   var echoInitAttempts = 0;
+  var echoListenerBound = false;
   function setupEchoListener() {
+    if (echoListenerBound) return;
+
     if (typeof window.Echo === 'undefined') {
       echoInitAttempts++;
       if (echoInitAttempts === 1 && typeof window !== 'undefined') {
@@ -2045,6 +2052,8 @@
       setTimeout(setupEchoListener, 300);
       return;
     }
+
+    echoListenerBound = true;
 
     var channelNames = ['draft.screen', 'draft.league.' + currentLeagueType];
     if (currentLeagueType === 'male') {
