@@ -80,6 +80,23 @@ class TeamController extends Controller
             ->whereRaw('LOWER(email) = ?', [strtolower((string) $user->email)])
             ->first();
 
+        // Self-heal fallback: If email didn't match directly, try matching by name for team accounts
+        if (! $team && ! empty($user->name) && ($user->hasRole('team') || $user->created_by_admin)) {
+            $team = Team::query()
+                ->with(['participants.category'])
+                ->whereRaw('LOWER(name) = ?', [strtolower((string) $user->name)])
+                ->first();
+
+            if ($team && ! $user->isAdmin()) {
+                $user->update(['email' => $team->email]);
+            }
+        }
+
+        // Keep user name in sync with team name
+        if ($team && ! $user->isAdmin() && $user->name !== $team->name) {
+            $user->update(['name' => $team->name]);
+        }
+
         if (! $user->isAdmin() && ! $user->hasRole('team')) {
             if (! $team) {
                 abort(403, 'Unauthorized. Team access required.');
@@ -187,6 +204,8 @@ class TeamController extends Controller
 
         $linkedTeamId = Team::query()
             ->whereRaw('LOWER(email) = ?', [strtolower((string) $user->email)])
+            ->value('id') ?? Team::query()
+            ->whereRaw('LOWER(name) = ?', [strtolower((string) $user->name)])
             ->value('id');
 
         $isTeamUser = ! $user->isAdmin() && $user->hasRole('team');
@@ -581,12 +600,33 @@ class TeamController extends Controller
     {
         $result = $this->draftService->tick($round);
 
+        $message = 'Turn is still active.';
+        if (! empty($result['is_waiting_for_admin'])) {
+            $message = 'Turn expired without pick. Waiting for admin to show timer.';
+        } elseif ($result['advanced']) {
+            $message = 'Turn expired and moved to next team.';
+        } elseif ($result['round_closed']) {
+            $message = 'Round is already closed.';
+        }
+
         return response()->json(array_merge($result, [
             'roundId' => (int) $round->id,
-            'message' => $result['advanced']
-                ? 'Turn expired and moved to next team.'
-                : ($result['round_closed'] ? 'Round is already closed.' : 'Turn is still active.'),
+            'message' => $message,
         ]));
+    }
+
+    /**
+     * Show timer for next team after turn expiry.
+     */
+    public function showTimer(DraftRound $round)
+    {
+        if ($round->status !== 'active') {
+            return back()->with('error', 'Only active draft rounds can show timer.');
+        }
+
+        $this->draftService->showTimer($round);
+
+        return back()->with('success', 'Timer initialized for next team.');
     }
 
     /**
@@ -620,6 +660,10 @@ class TeamController extends Controller
             return back()->with('error', 'Only active draft rounds can be paused.');
         }
 
+        if ($round->is_waiting_for_admin) {
+            return back()->with('error', 'Draft is currently waiting for admin to show timer.');
+        }
+
         $this->draftService->pause($round);
 
         return back()->with('success', 'Draft round timer paused successfully.');
@@ -632,6 +676,10 @@ class TeamController extends Controller
     {
         if ($round->status !== 'active') {
             return back()->with('error', 'Only active draft rounds can be resumed.');
+        }
+
+        if ($round->is_waiting_for_admin) {
+            return back()->with('error', 'Draft is currently waiting for admin to show timer.');
         }
 
         $this->draftService->resume($round);
@@ -728,9 +776,12 @@ class TeamController extends Controller
             $validated['logo'] = $request->file('logo')->store('team-logos', 'public');
         }
 
+        $oldEmail = (string) ($team->getOriginal('email') ?? $team->email);
+        $oldName = (string) ($team->getOriginal('name') ?? $team->name);
+
         $team->update($validated);
 
-        $accountResult = $this->ensureTeamUserAccount($validated['name'], $validated['email']);
+        $accountResult = $this->ensureTeamUserAccount($validated['name'], $validated['email'], $oldEmail, $oldName);
 
         if (! empty($accountResult['blocked'])) {
             return back()->with('error', $accountResult['message']);
@@ -764,8 +815,9 @@ class TeamController extends Controller
                 Storage::disk('public')->delete($team->logo);
             }
 
-            if ($team->email) {
-                $teamUser = User::where('email', $team->email)->first();
+            if ($team->email || $team->name) {
+                $teamUser = User::whereRaw('LOWER(email) = ?', [strtolower((string) $team->email)])->first()
+                    ?? User::whereRaw('LOWER(name) = ?', [strtolower((string) $team->name)])->first();
                 if ($teamUser && ! $teamUser->isAdmin()) {
                     $teamUser->delete();
                 }
@@ -873,9 +925,41 @@ class TeamController extends Controller
     /**
      * Ensure a team-role user exists for a team email.
      */
-    private function ensureTeamUserAccount(string $teamName, string $email): array
+    private function ensureTeamUserAccount(string $teamName, string $email, ?string $oldEmail = null, ?string $oldName = null): array
     {
-        $user = User::query()->where('email', $email)->first();
+        // 1. If updating an existing team and email or name changed, locate existing team user by old email or old name
+        if ($oldEmail || $oldName) {
+            $existingUserQuery = User::query();
+            if ($oldEmail && $oldName) {
+                $existingUserQuery->where(function ($q) use ($oldEmail, $oldName) {
+                    $q->whereRaw('LOWER(email) = ?', [strtolower($oldEmail)])
+                        ->orWhereRaw('LOWER(name) = ?', [strtolower($oldName)]);
+                });
+            } elseif ($oldEmail) {
+                $existingUserQuery->whereRaw('LOWER(email) = ?', [strtolower($oldEmail)]);
+            } else {
+                $existingUserQuery->whereRaw('LOWER(name) = ?', [strtolower($oldName)]);
+            }
+
+            $existingUser = $existingUserQuery->first();
+
+            if ($existingUser && ! $existingUser->isAdmin()) {
+                $existingUser->update([
+                    'name' => $teamName,
+                    'email' => $email,
+                    'created_by_admin' => true,
+                ]);
+                $existingUser->syncRoles(['team']);
+
+                return [
+                    'created' => false,
+                    'email' => $existingUser->email,
+                    'password' => null,
+                ];
+            }
+        }
+
+        $user = User::query()->whereRaw('LOWER(email) = ?', [strtolower($email)])->first();
 
         if ($user && $user->isAdmin()) {
             return [
