@@ -35,7 +35,7 @@ class DraftScreenAction implements ShouldBroadcastNow, ShouldDispatchAfterCommit
     public function broadcastOn(): array
     {
         $channel = 'draft.league.'.$this->leagueType;
-        $channels = [new Channel($channel)];
+        $channels = [new Channel($channel), new Channel('draft.screen')];
 
         if ($this->leagueType === 'male') {
             $channels[] = new Channel('draft.league.males');
