@@ -11,8 +11,8 @@
 <body>
     <div class="login-container">
         <div class="login-header">
-            <img src="{{ asset('images/logo.webp') }}" alt="KTPL Logo" class="login-logo">
-            <h1>KTPL Account Login</h1>
+            <img src="{{ asset('images/ptpl-Logo.png') }}" alt="PTPL Logo" class="login-logo">
+            <h1>PTPL Account Login</h1>
             <p>Participant Management System</p>
         </div>
 

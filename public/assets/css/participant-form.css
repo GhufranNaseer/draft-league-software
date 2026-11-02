@@ -25,9 +25,10 @@
         }
 
         .form-logo {
-            width: 300px;
-            max-width: 100%;
-            margin-bottom: 12px;
+            max-width: 520px;
+            width: 100%;
+            height: auto;
+            margin-bottom: 16px;
         }
 
         .form-body {
