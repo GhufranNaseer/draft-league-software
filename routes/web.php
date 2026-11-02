@@ -66,11 +66,13 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::post('/draft/rounds/{round}/close', [TeamController::class, 'closeRound'])->name('draft.round.close');
     Route::post('/draft/rounds/{round}/pause', [TeamController::class, 'pauseRound'])->name('draft.round.pause');
     Route::post('/draft/rounds/{round}/resume', [TeamController::class, 'resumeRound'])->name('draft.round.resume');
+    Route::post('/draft/rounds/{round}/show-timer', [TeamController::class, 'showTimer'])->name('draft.round.show-timer');
     Route::post('/draft/rounds/{round}/reset-timer', [TeamController::class, 'resetRoundTimer'])->name('draft.round.reset-timer');
 
     // Drafting Screen (PTPL draft card full screen)
     Route::get('/drafting-screen', [AdminController::class, 'draftingScreen'])->name('drafting-screen');
     Route::get('/drafting-screen/latest', [AdminController::class, 'latestDraftingPick'])->name('drafting-screen.latest');
+    Route::post('/drafting-screen/action', [AdminController::class, 'screenAction'])->name('drafting-screen.action');
 
     // League setup
     Route::post('/league-setup', [TeamController::class, 'saveLeagueSetup'])->name('league.setup.save');

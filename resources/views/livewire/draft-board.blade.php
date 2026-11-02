@@ -13,9 +13,9 @@
     x-destroy="destroyTimer()"
 >
     @if($activeRound && !$activeRound->is_paused)
-        <div wire:poll.10s="pollActiveRound" class="d-none"></div>
+        <div wire:poll.3s="pollActiveRound" class="d-none"></div>
     @else
-        <div wire:poll.15s="pollActiveRound" class="d-none"></div>
+        <div wire:poll.10s="pollActiveRound" class="d-none"></div>
     @endif
 
     <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-2 mb-3">
@@ -30,6 +30,18 @@
 
     <div class="round-setup-card mb-4">
         <h5 class="mb-3"><i class="bi bi-gear"></i> Draft Round Setup</h5>
+        @if(!empty($latestSkip))
+            <div class="alert alert-warning d-flex align-items-center justify-content-between py-2 px-3 mb-3 border-warning shadow-sm">
+                <div class="d-flex align-items-center flex-wrap gap-1">
+                    <i class="bi bi-exclamation-triangle-fill text-warning me-1"></i>
+                    <span class="fw-bold">{{ $latestSkip['teamName'] }} | Round {{ $latestSkip['roundNumber'] }} | Pick {{ $latestSkip['pickNumber'] }}</span>
+                    <span class="badge bg-danger ms-1 fw-bold">SKIPPED</span>
+                </div>
+                @if(!empty($latestSkip['skippedAt']))
+                    <small class="text-muted">{{ \Carbon\Carbon::parse($latestSkip['skippedAt'])->diffForHumans() }}</small>
+                @endif
+            </div>
+        @endif
         @if($activeRound)
             <div class="alert alert-info mb-0">
                 <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-center">
@@ -41,31 +53,60 @@
                         <span class="mx-1">|</span>
                         Pick {{ $activeRound->current_pick_number }} / {{ collect($activeRound->pick_order)->map(fn ($id) => (int) $id)->filter(fn ($id) => $id > 0)->count() }}
                         <span class="mx-1">|</span>
-                        Timer: <span wire:ignore><strong><span x-text="`${formatTime(remaining)} / ${formatTime(total)}`"></span></strong></span>
-                        <span class="badge bg-warning text-dark ms-1" x-show="isPaused" style="{{ ($activeRound && $activeRound->is_paused) ? '' : 'display: none;' }}"><i class="bi bi-pause-fill"></i> PAUSED</span>
+                        Timer:
+                        @if($activeRound->is_waiting_for_admin)
+                            <span class="badge bg-danger ms-1"><i class="bi bi-clock-history"></i> SKIPPED &mdash; WAITING FOR ADMIN</span>
+                        @else
+                            <span wire:ignore><strong><span x-text="`${formatTime(remaining)} / ${formatTime(total)}`"></span></strong></span>
+                            <span class="badge bg-warning text-dark ms-1" x-show="isPaused" style="{{ ($activeRound && $activeRound->is_paused) ? '' : 'display: none;' }}"><i class="bi bi-pause-fill"></i> PAUSED</span>
+                        @endif
                     </div>
                     <div class="d-flex align-items-center gap-2">
-                        @if($activeRound->is_paused)
-                            <button class="btn btn-sm btn-success" wire:click="resumeRound({{ $activeRound->id }})" wire:loading.attr="disabled" type="button">
-                                <i class="bi bi-play-fill"></i> <span wire:loading.remove wire:target="resumeRound">Resume</span><span wire:loading wire:target="resumeRound">Resuming...</span>
+                        @if($activeRound->is_waiting_for_admin)
+                            <button class="btn btn-sm btn-primary fw-bold" wire:click="showTimer({{ $activeRound->id }})" wire:loading.attr="disabled" type="button" id="showTimerBtn">
+                                <i class="bi bi-eye"></i> <span wire:loading.remove wire:target="showTimer">SHOW TIMER</span><span wire:loading wire:target="showTimer">Preparing Next Turn...</span>
                             </button>
                         @else
-                            <button class="btn btn-sm btn-warning text-dark" wire:click="pauseRound({{ $activeRound->id }})" wire:loading.attr="disabled" type="button">
-                                <i class="bi bi-pause-fill"></i> <span wire:loading.remove wire:target="pauseRound">Pause</span><span wire:loading wire:target="pauseRound">Pausing...</span>
+                            @if($activeRound->is_paused)
+                                <button class="btn btn-sm btn-success" wire:click="resumeRound({{ $activeRound->id }})" wire:loading.attr="disabled" type="button">
+                                    <i class="bi bi-play-fill"></i> <span wire:loading.remove wire:target="resumeRound">Resume</span><span wire:loading wire:target="resumeRound">Resuming...</span>
+                                </button>
+                            @else
+                                <button class="btn btn-sm btn-warning text-dark" wire:click="pauseRound({{ $activeRound->id }})" wire:loading.attr="disabled" type="button">
+                                    <i class="bi bi-pause-fill"></i> <span wire:loading.remove wire:target="pauseRound">Pause</span><span wire:loading wire:target="pauseRound">Pausing...</span>
+                                </button>
+                            @endif
+                            <button class="btn btn-sm btn-outline-secondary" wire:click="resetRoundTimer({{ $activeRound->id }})" wire:loading.attr="disabled" type="button" title="Reset timer to configured round duration">
+                                <i class="bi bi-arrow-counterclockwise"></i> <span wire:loading.remove wire:target="resetRoundTimer">Reset</span><span wire:loading wire:target="resetRoundTimer">Resetting...</span>
                             </button>
                         @endif
-                        <button class="btn btn-sm btn-outline-secondary" wire:click="resetRoundTimer({{ $activeRound->id }})" wire:loading.attr="disabled" type="button" title="Reset timer to configured round duration">
-                            <i class="bi bi-arrow-counterclockwise"></i> <span wire:loading.remove wire:target="resetRoundTimer">Reset</span><span wire:loading wire:target="resetRoundTimer">Resetting...</span>
-                        </button>
                         <form method="POST" action="{{ route('admin.draft.round.close', $activeRound->id) }}" onsubmit="return confirm('Close the active round now?');" class="d-inline mb-0">
                             @csrf
                             <button class="btn btn-sm btn-outline-danger" type="submit">Close Round</button>
                         </form>
-
+                        <button class="btn btn-sm btn-info text-white fw-bold" wire:click="showPlayerCard" wire:loading.attr="disabled" type="button" title="Show Picked Player Details Card on Drafting Screen">
+                            <i class="bi bi-person-badge"></i> <span wire:loading.remove wire:target="showPlayerCard">Player Details</span><span wire:loading wire:target="showPlayerCard">Showing...</span>
+                        </button>
+                        <button class="btn btn-sm btn-warning text-dark fw-bold" wire:click="showRoundClosed" wire:loading.attr="disabled" type="button" title="Show Round Closed Screen on Drafting Screen">
+                            <i class="bi bi-flag-fill"></i> <span wire:loading.remove wire:target="showRoundClosed">Round Closed</span><span wire:loading wire:target="showRoundClosed">Showing...</span>
+                        </button>
                     </div>
                 </div>
             </div>
         @else
+            <div class="d-flex align-items-center justify-content-between mb-3 p-2 bg-light rounded border">
+                <span class="text-muted small fw-semibold">
+                    <i class="bi bi-display"></i> Live Screen Controls:
+                </span>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-sm btn-info text-white fw-bold" wire:click="showPlayerCard" wire:loading.attr="disabled" type="button" title="Show Picked Player Details Card on Drafting Screen">
+                        <i class="bi bi-person-badge"></i> <span wire:loading.remove wire:target="showPlayerCard">Show Player Details</span><span wire:loading wire:target="showPlayerCard">Showing...</span>
+                    </button>
+                    <button class="btn btn-sm btn-warning text-dark fw-bold" wire:click="showRoundClosed" wire:loading.attr="disabled" type="button" title="Show Round Closed Screen on Drafting Screen">
+                        <i class="bi bi-flag-fill"></i> <span wire:loading.remove wire:target="showRoundClosed">Show Round Closed</span><span wire:loading wire:target="showRoundClosed">Showing...</span>
+                    </button>
+                </div>
+            </div>
             <form method="POST" action="{{ route('admin.draft.round.start') }}">
                 @csrf
                 <input type="hidden" name="league_type" value="{{ $leagueType }}">

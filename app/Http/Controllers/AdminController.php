@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\DraftScreenAction;
 use App\Models\Category;
 use App\Models\DraftPick;
 use App\Models\DraftRound;
@@ -13,6 +14,7 @@ use App\Services\DraftService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -216,8 +218,25 @@ class AdminController extends Controller
 
         $validated['is_admin'] = $isAdmin;
 
+        $oldEmail = (string) $user->email;
+        $oldName = (string) $user->name;
+
         $user->update($validated);
         $user->syncRoles($selectedRoles);
+
+        if ($user->hasRole('team')) {
+            $linkedTeam = Team::query()
+                ->whereRaw('LOWER(email) = ?', [strtolower($oldEmail)])
+                ->orWhereRaw('LOWER(name) = ?', [strtolower($oldName)])
+                ->first();
+
+            if ($linkedTeam) {
+                $linkedTeam->update([
+                    'name' => $user->name,
+                    'email' => $user->email,
+                ]);
+            }
+        }
 
         return back()->with('success', 'User updated successfully');
     }
@@ -605,6 +624,7 @@ class AdminController extends Controller
         }
 
         $formattedPick = $this->formatDraftPickData($latestPick);
+        $latestSkip = $draftService->getLatestSkip($leagueType, $activeRound);
 
         return view('admin.drafting-screen', [
             'leagueType' => $leagueType,
@@ -612,6 +632,7 @@ class AdminController extends Controller
             'activeRound' => $activeRound,
             'activeRoundData' => $activeRoundData,
             'initialPick' => $formattedPick,
+            'latestSkip' => $latestSkip,
         ]);
     }
 
@@ -640,6 +661,11 @@ class AdminController extends Controller
             ->latest('id')
             ->first();
 
+        if ($activeRound && ! $activeRound->is_paused && ! $activeRound->is_waiting_for_admin && $draftService->isTurnExpired($activeRound)) {
+            $draftService->tick($activeRound);
+            $activeRound->refresh();
+        }
+
         $activeRoundData = $this->formatActiveRoundData($activeRound);
 
         $latestPick = null;
@@ -660,6 +686,7 @@ class AdminController extends Controller
         }
 
         $formattedPick = $this->formatDraftPickData($latestPick);
+        $latestSkip = $draftService->getLatestSkip($leagueType, $activeRound);
 
         $now = now();
         $serverTimeMs = (int) round(microtime(true) * 1000);
@@ -678,8 +705,61 @@ class AdminController extends Controller
         $response['serverTimeMs'] = $serverTimeMs;
         $response['stateVersion'] = $serverTimeMs;
         $response['activeRound'] = $activeRoundData;
+        $response['latestSkip'] = $latestSkip;
 
         return response()->json($response);
+    }
+
+    /**
+     * Broadcast a remote screen action (e.g. show_player_card, show_round_closed)
+     */
+    public function screenAction(Request $request)
+    {
+        $validated = $request->validate([
+            'action' => 'required|string|in:show_player_card,show_round_closed,toggle_view',
+            'league_type' => 'nullable|string',
+        ]);
+
+        $draftService = app(DraftService::class);
+        $leagueType = $draftService->normalizeLeagueType($validated['league_type'] ?? 'male');
+
+        $payload = null;
+        if ($validated['action'] === 'show_round_closed') {
+            $leagueVariants = [$leagueType];
+            if ($leagueType === 'male') {
+                $leagueVariants[] = 'males';
+            } elseif ($leagueType === 'males') {
+                $leagueVariants[] = 'male';
+            } elseif ($leagueType === 'female') {
+                $leagueVariants[] = 'females';
+            } elseif ($leagueType === 'females') {
+                $leagueVariants[] = 'female';
+            }
+
+            $round = DraftRound::query()
+                ->with('category')
+                ->whereIn('league_type', $leagueVariants)
+                ->latest('id')
+                ->first();
+
+            $payload = [
+                'roundNumber' => (int) ($round?->round_number ?: $round?->id ?: 1),
+                'categoryName' => $round?->category?->name ?? 'DRAFT',
+                'status' => 'CLOSED',
+            ];
+        }
+
+        try {
+            event(new DraftScreenAction($leagueType, $validated['action'], $payload));
+        } catch (\Throwable $e) {
+            Log::warning('Broadcast failed in AdminController::screenAction: '.$e->getMessage());
+        }
+
+        if ($request->wantsJson()) {
+            return response()->json(['success' => true, 'action' => $validated['action']]);
+        }
+
+        return back()->with('success', 'Screen action broadcasted.');
     }
 
     private function formatActiveRoundData(?DraftRound $round): ?array
@@ -691,10 +771,13 @@ class AdminController extends Controller
         $remainingSeconds = 0;
         $isRunningTurn = false;
 
-        if ($round->status === 'active' && ! $round->is_paused && $round->current_turn_started_at !== null) {
+        if ($round->status === 'active' && ! $round->is_paused && ! $round->is_waiting_for_admin && $round->current_turn_started_at !== null) {
             $elapsed = (int) floor(abs(now()->diffInSeconds($round->current_turn_started_at)));
             $remainingSeconds = max(0, (int) $round->turn_time_seconds - $elapsed);
             $isRunningTurn = ($remainingSeconds > 0);
+        } elseif ($round->is_waiting_for_admin) {
+            $remainingSeconds = 0;
+            $isRunningTurn = false;
         } elseif ($round->is_paused) {
             $remainingSeconds = $round->remaining_turn_seconds !== null ? (int) $round->remaining_turn_seconds : (int) $round->turn_time_seconds;
             $isRunningTurn = false;
@@ -705,11 +788,13 @@ class AdminController extends Controller
 
         $now = now();
         $serverTimeMs = (int) round(microtime(true) * 1000);
+        $latestSkip = app(DraftService::class)->getLatestSkip((string) ($round->league_type ?? 'male'), $round);
 
         return [
             'id' => (int) $round->id,
             'roundNumber' => (int) ($round->round_number ?: $round->id),
             'status' => (string) $round->status,
+            'state' => method_exists($round, 'getCurrentState') ? $round->getCurrentState() : ($round->is_waiting_for_admin ? 'skipped_waiting_for_admin' : ($round->is_paused ? 'paused' : 'active')),
             'currentTeamId' => $round->current_team_id ? (int) $round->current_team_id : null,
             'currentTeamName' => $round->currentTeam?->name ?? '—',
             'currentPickNumber' => (int) $round->current_pick_number,
@@ -718,12 +803,14 @@ class AdminController extends Controller
             'remainingSeconds' => (int) $remainingSeconds,
             'remainingTurnSeconds' => (int) $remainingSeconds,
             'isPaused' => (bool) $round->is_paused,
+            'isWaitingForAdmin' => (bool) $round->is_waiting_for_admin,
             'isRunningTurn' => (bool) $isRunningTurn,
             'turnStartedAt' => $round->current_turn_started_at?->toIso8601String(),
             'turnStartedAtMs' => $round->current_turn_started_at ? (int) $round->current_turn_started_at->getTimestampMs() : null,
             'serverTime' => $now->toIso8601String(),
             'serverTimeMs' => $serverTimeMs,
             'stateVersion' => $serverTimeMs,
+            'latestSkip' => $latestSkip,
         ];
     }
 
@@ -742,6 +829,11 @@ class AdminController extends Controller
             $passportUrl = asset('storage/'.ltrim($player->passport_picture, '/'));
         }
 
+        $teamLogoUrl = null;
+        if ($pick->team?->logo) {
+            $teamLogoUrl = asset('storage/'.ltrim($pick->team->logo, '/'));
+        }
+
         return [
             'pickId' => (int) $pick->id,
             'roundId' => (int) $pick->draft_round_id,
@@ -749,7 +841,9 @@ class AdminController extends Controller
             'leagueType' => (string) ($pick->round?->league_type ?? 'male'),
             'pickNumber' => (int) $pick->pick_number,
             'pickedAt' => $pick->picked_at?->toIso8601String(),
+            'teamId' => $pick->team_id ? (int) $pick->team_id : null,
             'teamName' => $pick->team?->name ?? '—',
+            'teamLogoUrl' => $teamLogoUrl,
             'player' => [
                 'id' => (int) $player->id,
                 'fullName' => $player->full_name ?: trim($player->first_name.' '.$player->last_name),

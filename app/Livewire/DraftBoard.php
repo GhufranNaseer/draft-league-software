@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Events\DraftScreenAction;
 use App\Models\Category;
 use App\Models\DraftPick;
 use App\Models\DraftRound;
@@ -9,6 +10,7 @@ use App\Models\LeagueRoundConfig;
 use App\Models\Participant;
 use App\Models\Team;
 use App\Services\DraftService;
+use Illuminate\Broadcasting\BroadcastException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\View\View;
@@ -20,6 +22,8 @@ class DraftBoard extends Component
     public string $leagueType;
 
     public string $selectedCategoryKey = '';
+
+    public ?array $latestSkip = null;
 
     public function mount(string $leagueType): void
     {
@@ -35,6 +39,12 @@ class DraftBoard extends Component
     #[On('echo:draft.league.{leagueType},draft.turn.changed')]
     public function turnChanged(array $event = []): void
     {
+        if (! empty($event['skippedPick'])) {
+            $this->latestSkip = $event['skippedPick'];
+        } elseif (! empty($event['latestSkip'])) {
+            $this->latestSkip = $event['latestSkip'];
+        }
+
         if (! empty($event) && isset($event['roundId'])) {
             $roundId = (int) $event['roundId'];
             $pickNumber = (int) ($event['currentPickNumber'] ?? 0);
@@ -149,6 +159,8 @@ class DraftBoard extends Component
             $this->dispatch('timer-sync', [
                 'remaining' => (int) $remaining,
                 'isPaused' => (bool) $updated->is_paused,
+                'isWaitingForAdmin' => (bool) $updated->is_waiting_for_admin,
+                'state' => $updated->getCurrentState(),
                 'total' => $total,
                 'turnKey' => $updated->id.'-'.$updated->current_pick_number.($startedAt ? ('@'.$startedAt) : ''),
                 'hasActiveRound' => true,
@@ -160,6 +172,96 @@ class DraftBoard extends Component
         }
     }
 
+    public function showTimer(int $roundId): void
+    {
+        if (! auth()->user()?->hasRole('admin')) {
+            abort(403);
+        }
+
+        $round = DraftRound::find($roundId);
+        if (! $round) {
+            return;
+        }
+
+        $updated = app(DraftService::class)->showTimer($round);
+        $total = (int) $updated->turn_time_seconds;
+        $remaining = (int) ($updated->remaining_turn_seconds ?? $total);
+        $startedAt = $updated->current_turn_started_at?->toIso8601String() ?? '';
+        $startedAtMs = $updated->current_turn_started_at ? (int) $updated->current_turn_started_at->getTimestampMs() : null;
+        $serverTimeMs = (int) round(microtime(true) * 1000);
+
+        Log::debug('[DRAFT-TIMER-DEBUG] DraftBoard::showTimer executed.', [
+            'round_id' => $updated->id,
+            'current_team_id' => $updated->current_team_id,
+            'remaining' => $remaining,
+            'is_waiting_for_admin' => (bool) $updated->is_waiting_for_admin,
+            'is_paused' => (bool) $updated->is_paused,
+        ]);
+
+        $this->dispatch('timer-sync', [
+            'remaining' => (int) $remaining,
+            'isPaused' => (bool) $updated->is_paused,
+            'isWaitingForAdmin' => (bool) $updated->is_waiting_for_admin,
+            'state' => $updated->getCurrentState(),
+            'total' => $total,
+            'turnKey' => $updated->id.'-'.$updated->current_pick_number.($startedAt ? ('@'.$startedAt) : ''),
+            'hasActiveRound' => $updated->status === 'active',
+            'forceReset' => true,
+            'turnStartedAtMs' => $startedAtMs,
+            'serverTimeMs' => $serverTimeMs,
+            'stateVersion' => $serverTimeMs,
+        ]);
+    }
+
+    public function showPlayerCard(): void
+    {
+        if (! auth()->user()?->hasRole('admin')) {
+            abort(403);
+        }
+
+        try {
+            event(new DraftScreenAction($this->leagueType, 'show_player_card'));
+        } catch (\Throwable $e) {
+            Log::warning('Broadcast failed in DraftBoard::showPlayerCard: '.$e->getMessage());
+        }
+    }
+
+    public function showRoundClosed(): void
+    {
+        if (! auth()->user()?->hasRole('admin')) {
+            abort(403);
+        }
+
+        $leagueVariants = [$this->leagueType];
+        if ($this->leagueType === 'male') {
+            $leagueVariants[] = 'males';
+        } elseif ($this->leagueType === 'males') {
+            $leagueVariants[] = 'male';
+        } elseif ($this->leagueType === 'female') {
+            $leagueVariants[] = 'females';
+        } elseif ($this->leagueType === 'females') {
+            $leagueVariants[] = 'female';
+        }
+
+        $round = DraftRound::query()
+            ->with('category')
+            ->whereIn('league_type', $leagueVariants)
+            ->latest('id')
+            ->first();
+
+        $payload = [
+            'roundNumber' => (int) ($round?->round_number ?: $round?->id ?: 1),
+            'categoryName' => $round?->category?->name ?? 'DRAFT',
+            'status' => 'CLOSED',
+        ];
+
+        try {
+            event(new DraftScreenAction($this->leagueType, 'show_round_closed', $payload));
+        } catch (\Throwable $e) {
+            Log::warning('Broadcast failed in DraftBoard::showRoundClosed: '.$e->getMessage());
+        }
+    }
+
     public function tickTurn(int $roundId): void
     {
         $round = DraftRound::find($roundId);
@@ -168,7 +270,11 @@ class DraftBoard extends Component
             return;
         }
 
-        app(DraftService::class)->tick($round);
+        try {
+            app(DraftService::class)->tick($round);
+        } catch (BroadcastException $e) {
+            Log::warning('Broadcast failed in DraftBoard::tickTurn: '.$e->getMessage());
+        }
     }
 
     public function pollActiveRound(): void
@@ -179,11 +285,15 @@ class DraftBoard extends Component
             ->latest('id')
             ->first();
 
-        if (! $activeRound || $activeRound->is_paused) {
+        if (! $activeRound || $activeRound->is_paused || $activeRound->is_waiting_for_admin) {
             return;
         }
 
-        app(DraftService::class)->tick($activeRound);
+        try {
+            app(DraftService::class)->tick($activeRound);
+        } catch (BroadcastException $e) {
+            Log::warning('Broadcast failed in DraftBoard::pollActiveRound: '.$e->getMessage());
+        }
     }
 
     public function render(): View
@@ -290,6 +400,9 @@ class DraftBoard extends Component
             $this->selectedCategoryKey = (string) ($categories->first()?->id ?? 'uncategorized');
         }
 
+        $latestSkip = app(DraftService::class)->getLatestSkip($this->leagueType, $activeRound) ?? $this->latestSkip;
+        $this->latestSkip = $latestSkip;
+
         return view('livewire.draft-board', [
             'activeRound' => $activeRound,
             'teams' => $teams,
@@ -306,6 +419,7 @@ class DraftBoard extends Component
             'nextLeagueRoundConfig' => $nextLeagueRoundConfig,
             'totalLeagueRounds' => $totalLeagueRounds,
             'selectedCategoryKey' => $this->selectedCategoryKey,
+            'latestSkip' => $latestSkip,
         ]);
     }
 }
