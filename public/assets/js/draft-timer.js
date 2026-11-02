@@ -176,8 +176,14 @@ window.__ktplDraftTimer = window.__ktplDraftTimer || {
             const el = document.querySelector('[wire\\:id]');
             if (el) {
                 const component = window.Livewire.find(el.getAttribute('wire:id'));
-                if (component && typeof component.pollActiveRound === 'function') {
-                    component.pollActiveRound();
+                if (component) {
+                    if (component.$wire && typeof component.$wire.pollActiveRound === 'function') {
+                        component.$wire.pollActiveRound();
+                    } else if (typeof component.call === 'function') {
+                        component.call('pollActiveRound');
+                    } else if (typeof component.pollActiveRound === 'function') {
+                        component.pollActiveRound();
+                    }
                 }
             }
         }

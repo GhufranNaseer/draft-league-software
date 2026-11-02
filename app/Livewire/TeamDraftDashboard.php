@@ -8,6 +8,7 @@ use App\Models\Participant;
 use App\Models\Team;
 use App\Models\User;
 use App\Services\DraftService;
+use Illuminate\Broadcasting\BroadcastException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
@@ -21,6 +22,8 @@ class TeamDraftDashboard extends Component
 
     public string $leagueType = '';
 
+    public ?array $latestSkip = null;
+
     public function mount(int $teamId): void
     {
         $this->teamId = $teamId;
@@ -31,6 +34,12 @@ class TeamDraftDashboard extends Component
     #[On('echo:draft.league.{leagueType},draft.turn.changed')]
     public function turnChanged(array $event = []): void
     {
+        if (! empty($event['skippedPick'])) {
+            $this->latestSkip = $event['skippedPick'];
+        } elseif (! empty($event['latestSkip'])) {
+            $this->latestSkip = $event['latestSkip'];
+        }
+
         if (! empty($event) && isset($event['roundId'])) {
             $roundId = (int) $event['roundId'];
             $pickNumber = (int) ($event['currentPickNumber'] ?? 0);
@@ -75,7 +84,11 @@ class TeamDraftDashboard extends Component
             return;
         }
 
-        app(DraftService::class)->tick($round);
+        try {
+            app(DraftService::class)->tick($round);
+        } catch (BroadcastException $e) {
+            Log::warning('Broadcast failed in TeamDraftDashboard::tickTurn: '.$e->getMessage());
+        }
     }
 
     public function pollActiveRound(): void
@@ -86,11 +99,15 @@ class TeamDraftDashboard extends Component
             ->latest('id')
             ->first();
 
-        if (! $activeRound || $activeRound->is_paused) {
+        if (! $activeRound || $activeRound->is_paused || $activeRound->is_waiting_for_admin) {
             return;
         }
 
-        app(DraftService::class)->tick($activeRound);
+        try {
+            app(DraftService::class)->tick($activeRound);
+        } catch (BroadcastException $e) {
+            Log::warning('Broadcast failed in TeamDraftDashboard::pollActiveRound: '.$e->getMessage());
+        }
     }
 
     public function pickPlayer(int $participantId): void
@@ -120,6 +137,12 @@ class TeamDraftDashboard extends Component
 
         if (! $activeRound) {
             $this->addError('pick', 'No active draft round.');
+
+            return;
+        }
+
+        if ($activeRound->is_waiting_for_admin) {
+            $this->addError('pick', 'Current turn was skipped. Waiting for admin to show timer.');
 
             return;
         }
@@ -175,8 +198,9 @@ class TeamDraftDashboard extends Component
 
         $leagueType = (string) $team->league_type;
 
-        $isTeamTurn = $activeRound && (int) $activeRound->current_team_id === $this->teamId;
-        $isPaused = (bool) ($activeRound && $activeRound->is_paused);
+        $isWaitingForAdmin = (bool) ($activeRound && $activeRound->is_waiting_for_admin);
+        $isTeamTurn = $activeRound && (int) $activeRound->current_team_id === $this->teamId && ! $isWaitingForAdmin;
+        $isPaused = (bool) ($activeRound && ($activeRound->is_paused || $activeRound->is_waiting_for_admin));
 
         $teamRoundPicksCount = 0;
         $canPick = false;
@@ -194,6 +218,7 @@ class TeamDraftDashboard extends Component
 
             $canPick = $isTeamTurn
                 && ! $isPaused
+                && ! $isWaitingForAdmin
                 && $teamRoundPicksCount < (int) $activeRound->picks_per_team
                 && ! $draftService->isTurnExpired($activeRound);
 
@@ -207,7 +232,9 @@ class TeamDraftDashboard extends Component
                 ->orderBy('last_name')
                 ->get();
 
-            if ($activeRound->is_paused) {
+            if ($activeRound->is_waiting_for_admin) {
+                $activeRoundRemainingSeconds = 0;
+            } elseif ($activeRound->is_paused) {
                 $activeRoundRemainingSeconds = (int) ($activeRound->remaining_turn_seconds ?? $activeRound->turn_time_seconds);
             } elseif ($activeRound->current_turn_started_at) {
                 $elapsed = abs(Carbon::now()->diffInSeconds($activeRound->current_turn_started_at));
@@ -224,6 +251,9 @@ class TeamDraftDashboard extends Component
             ->limit(20)
             ->get();
 
+        $latestSkip = app(DraftService::class)->getLatestSkip($this->leagueType, $activeRound) ?? $this->latestSkip;
+        $this->latestSkip = $latestSkip;
+
         return view('livewire.team-draft-dashboard', compact(
             'team',
             'leagueType',
@@ -234,7 +264,8 @@ class TeamDraftDashboard extends Component
             'draftPoolParticipants',
             'teamRoundPicksCount',
             'activeRoundRemainingSeconds',
-            'draftActivity'
+            'draftActivity',
+            'latestSkip'
         ));
     }
 }

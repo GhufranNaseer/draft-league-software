@@ -13,9 +13,9 @@
     x-destroy="destroyTimer()"
 >
     @if($activeRound && !$activeRound->is_paused)
-        <div wire:poll.10s="pollActiveRound" class="d-none"></div>
+        <div wire:poll.3s="pollActiveRound" class="d-none"></div>
     @else
-        <div wire:poll.15s="pollActiveRound" class="d-none"></div>
+        <div wire:poll.10s="pollActiveRound" class="d-none"></div>
     @endif
 
     @if($errors->has('pick'))
@@ -23,6 +23,19 @@
     @endif
 
     <h5 class="mb-3">Active Draft Round</h5>
+
+    @if(!empty($latestSkip))
+        <div class="alert alert-warning d-flex align-items-center justify-content-between py-2 px-3 mb-3 border-warning shadow-sm">
+            <div class="d-flex align-items-center flex-wrap gap-1">
+                <i class="bi bi-exclamation-triangle-fill text-warning me-1"></i>
+                <span class="fw-bold">{{ $latestSkip['teamName'] }} | Round {{ $latestSkip['roundNumber'] }} | Pick {{ $latestSkip['pickNumber'] }}</span>
+                <span class="badge bg-danger ms-1 fw-bold">SKIPPED</span>
+            </div>
+            @if(!empty($latestSkip['skippedAt']))
+                <small class="text-muted">{{ \Carbon\Carbon::parse($latestSkip['skippedAt'])->diffForHumans() }}</small>
+            @endif
+        </div>
+    @endif
 
     @if($activeRound)
         <p class="mb-1"><strong>Category:</strong> {{ $activeRound->category?->name ?: 'N/A' }}</p>
@@ -34,7 +47,11 @@
             <span class="badge bg-warning text-dark ms-1" x-show="isPaused" style="{{ ($activeRound && $activeRound->is_paused) ? '' : 'display: none;' }}"><i class="bi bi-pause-fill"></i> PAUSED</span>
         </p>
 
-        @if($activeRound->is_paused)
+        @if($activeRound->is_waiting_for_admin)
+            <div class="alert alert-danger py-2 mb-3">
+                <i class="bi bi-clock-history me-1"></i> <strong>Turn Skipped:</strong> Countdown expired without a player selection. Waiting for admin to show next timer.
+            </div>
+        @elseif($activeRound->is_paused)
             <div class="alert alert-warning py-2 mb-3">
                 <i class="bi bi-pause-circle-fill me-1"></i> <strong>Draft Paused:</strong> Player picking is suspended until resumed by admin.
             </div>

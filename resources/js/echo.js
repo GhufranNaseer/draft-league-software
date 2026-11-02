@@ -21,12 +21,21 @@ const host = (typeof window !== 'undefined' && window.location.hostname)
 const isHttps = (typeof window !== 'undefined' && window.location.protocol === 'https:');
 const defaultPort = isHttps ? 443 : 80;
 const metaPort = getMeta('reverb-port');
+const envPort = import.meta.env.VITE_REVERB_PORT;
 
-const currentPort = (typeof window !== 'undefined' && window.location.port)
-    ? parseInt(window.location.port, 10)
-    : (metaPort ? parseInt(metaPort, 10) : (import.meta.env.VITE_REVERB_PORT ? parseInt(import.meta.env.VITE_REVERB_PORT, 10) : defaultPort));
+let currentPort;
+if (metaPort && parseInt(metaPort, 10)) {
+    currentPort = parseInt(metaPort, 10);
+} else if (envPort && parseInt(envPort, 10)) {
+    currentPort = parseInt(envPort, 10);
+} else if (typeof window !== 'undefined' && window.location.port) {
+    currentPort = parseInt(window.location.port, 10);
+} else {
+    currentPort = defaultPort;
+}
 
 const scheme = isHttps ? 'https' : (getMeta('reverb-scheme') || import.meta.env.VITE_REVERB_SCHEME || 'http');
+const useTLS = isHttps || scheme === 'https';
 
 if (key && key.trim() !== '') {
     try {
@@ -36,9 +45,26 @@ if (key && key.trim() !== '') {
             wsHost: host,
             wsPort: currentPort,
             wssPort: currentPort,
-            forceTLS: isHttps || scheme === 'https',
-            enabledTransports: ['ws', 'wss'],
+            forceTLS: useTLS,
+            enabledTransports: useTLS ? ['wss'] : ['ws'],
         });
+
+        if (window.Echo && window.Echo.connector && window.Echo.connector.pusher) {
+            let consecutiveFailures = 0;
+            const pusher = window.Echo.connector.pusher;
+
+            pusher.connection.bind('error', function () {
+                consecutiveFailures++;
+                if (consecutiveFailures >= 4) {
+                    console.warn(`[Echo] WebSocket server unreachable at ${host}:${currentPort}. Paused reconnection to prevent console spam. Run 'php artisan reverb:start' if real-time WebSockets are needed.`);
+                    pusher.disconnect();
+                }
+            });
+
+            pusher.connection.bind('connected', function () {
+                consecutiveFailures = 0;
+            });
+        }
 
         if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('echo:ready', { detail: { echo: window.Echo } }));
