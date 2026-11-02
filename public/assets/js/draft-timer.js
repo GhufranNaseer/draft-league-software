@@ -352,7 +352,9 @@ window.__ktplDraftTimer = window.__ktplDraftTimer || {
                 // Transition: Running -> PAUSED
                 this.stopTicker();
                 this.serverDeadline = null;
-                this.remaining = incomingRemaining;
+                if (Math.abs(this.remaining - incomingRemaining) > 1) {
+                    this.remaining = incomingRemaining;
+                }
 
                 logTimerTrace('pause-transition', {
                     source,
@@ -363,11 +365,13 @@ window.__ktplDraftTimer = window.__ktplDraftTimer || {
                 });
             } else {
                 // Transition: Paused -> RESUMED
-                this.remaining = incomingRemaining;
+                if (Math.abs(this.remaining - incomingRemaining) > 1) {
+                    this.remaining = incomingRemaining;
+                }
                 if (incomingTurnStartedAtMs) {
                     this.serverDeadline = incomingTurnStartedAtMs + (incomingTotal * 1000);
                 } else {
-                    this.serverDeadline = this.currentServerTimeMs() + (incomingRemaining * 1000);
+                    this.serverDeadline = this.currentServerTimeMs() + (this.remaining * 1000);
                 }
                 this.startTicker();
 
