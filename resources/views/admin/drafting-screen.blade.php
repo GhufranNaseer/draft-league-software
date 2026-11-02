@@ -15,6 +15,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700&family=Bebas+Neue&display=swap" rel="stylesheet">
+@vite(['resources/js/app.js'])
 <style>
   html, body {
     margin: 0;
@@ -79,7 +80,7 @@
     display: none;
   }
   #stage.mode-card #starSvg { display: block !important; }
-  #stage.mode-countdown #starSvg { display: none !important; }
+  #stage.mode-countdown #starSvg, #stage.mode-skipped #starSvg, #stage.mode-round-closed #starSvg { display: none !important; }
 
   #starSvg .glow-yellow { filter: drop-shadow(0 0 7px rgba(206,240,70,.35)); }
   #starSvg .glow-white  { filter: drop-shadow(0 0 7px rgba(255,255,255,.95)) drop-shadow(0 0 16px rgba(255,255,255,.6)); }
@@ -199,6 +200,170 @@
   #digits.long { font-size: 340px; }
   #digits .d { display: inline-block; width: var(--cell, .42em); text-align: center; }
   #digits .c { display: inline-block; width: var(--colon, .22em); text-align: center; }
+
+  /* Heartbeat animation for final 10 seconds of countdown */
+  #digits.timer-heartbeat {
+    animation: timerHeartbeat 0.9s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+    transform-origin: center center;
+    will-change: transform, filter;
+  }
+
+  @keyframes timerHeartbeat {
+    0% {
+      transform: translateY(var(--nudge, 0em)) scale(1);
+      filter: drop-shadow(0 0 0 rgba(255, 42, 68, 0));
+    }
+    14% {
+      transform: translateY(var(--nudge, 0em)) scale(1.07);
+      filter: drop-shadow(0 0 35px rgba(255, 42, 68, 0.85));
+    }
+    28% {
+      transform: translateY(var(--nudge, 0em)) scale(1);
+      filter: drop-shadow(0 0 10px rgba(255, 42, 68, 0.3));
+    }
+    42% {
+      transform: translateY(var(--nudge, 0em)) scale(1.04);
+      filter: drop-shadow(0 0 25px rgba(255, 42, 68, 0.65));
+    }
+    70% {
+      transform: translateY(var(--nudge, 0em)) scale(1);
+      filter: drop-shadow(0 0 0 rgba(255, 42, 68, 0));
+    }
+    100% {
+      transform: translateY(var(--nudge, 0em)) scale(1);
+      filter: drop-shadow(0 0 0 rgba(255, 42, 68, 0));
+    }
+  }
+
+  /* Skipped turn card replacing countdown digits */
+  .skipped-turn-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    z-index: 7;
+    padding: 28px 70px;
+    border-radius: 40px;
+    background: radial-gradient(circle, rgba(90, 10, 25, 0.92) 0%, rgba(35, 5, 12, 0.96) 100%);
+    border: 4.5px solid #ff2a44;
+    box-shadow: 0 0 60px rgba(255, 42, 68, 0.65), inset 0 0 35px rgba(255, 42, 68, 0.35);
+    margin-top: 14px;
+    min-width: 960px;
+    max-width: 1500px;
+    animation: skippedCardGlow 2s ease-in-out infinite alternate;
+  }
+  @keyframes skippedCardGlow {
+    0% { transform: scale(0.99); box-shadow: 0 0 40px rgba(255, 42, 68, 0.5); }
+    100% { transform: scale(1.01); box-shadow: 0 0 75px rgba(255, 42, 68, 0.9); }
+  }
+  .skipped-badge-glory {
+    display: inline-flex;
+    align-items: center;
+    background: #ff1e3c;
+    color: #ffffff;
+    font-size: 52px;
+    letter-spacing: 8px;
+    font-weight: 700;
+    padding: 10px 48px;
+    border-radius: 44px;
+    box-shadow: 0 0 30px rgba(255, 30, 60, 0.95);
+    margin-bottom: 14px;
+  }
+  .skipped-team-name {
+    font-size: 115px;
+    letter-spacing: 3px;
+    color: #ffffff;
+    font-weight: 700;
+    line-height: 1.05;
+    text-transform: uppercase;
+    text-shadow: 0 0 35px rgba(255,255,255,0.9), 0 4px 18px rgba(0,0,0,0.95);
+    max-width: 1400px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .skipped-meta-line {
+    font-size: 54px;
+    letter-spacing: 4px;
+    color: #ffb703;
+    font-weight: 700;
+    text-transform: uppercase;
+    text-shadow: 0 0 24px rgba(255, 183, 3, 0.85);
+    margin-top: 6px;
+  }
+  .skipped-full-summary {
+    font-size: 36px;
+    letter-spacing: 4px;
+    color: #ffdede;
+    font-weight: 700;
+    text-transform: uppercase;
+    margin-top: 12px;
+    border-top: 2px solid rgba(255,255,255,0.22);
+    padding-top: 12px;
+    width: 100%;
+  }
+
+  /* =========================================================================
+     3. SKIPPED VIEW (State C) - Full Stage Layout
+     ========================================================================= */
+  #skippedView {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1920px;
+    height: 1080px;
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 8;
+  }
+  .skipped-screen-backdrop {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at center, rgba(130, 10, 25, 0.55) 0%, rgba(18, 3, 7, 0.94) 100%);
+    pointer-events: none;
+  }
+  .skipped-screen-container {
+    position: relative;
+    z-index: 9;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 50px 96px;
+    border-radius: 46px;
+    background: radial-gradient(circle, rgba(95, 10, 26, 0.96) 0%, rgba(28, 4, 10, 0.98) 100%);
+    border: 5px solid #ff2a44;
+    box-shadow: 0 0 90px rgba(255, 42, 68, 0.8), inset 0 0 50px rgba(255, 42, 68, 0.4);
+    min-width: 1050px;
+    max-width: 1600px;
+    animation: skippedCardGlow 2.2s ease-in-out infinite alternate;
+  }
+  .skipped-waiting-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 14px;
+    font-size: 26px;
+    letter-spacing: 3px;
+    color: #ffb7b7;
+    font-weight: 600;
+    margin-top: 24px;
+    text-transform: uppercase;
+  }
+  .skipped-pulsing-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #ff2a44;
+    box-shadow: 0 0 16px #ff2a44;
+    animation: skippedPulse 1.2s infinite ease-in-out;
+  }
+  @keyframes skippedPulse {
+    0%, 100% { transform: scale(0.9); opacity: 0.6; }
+    50% { transform: scale(1.3); opacity: 1; }
+  }
 
   /* =========================================================================
      PLAYER CARD VIEW (ptpl-draft-card.html)
@@ -435,6 +600,142 @@
     color: #38e8ff; font-size: 13px; font-weight: 600; text-transform: uppercase;
     letter-spacing: 0.5px;
   }
+
+  /* =========================================================================
+     4. ROUND CLOSED VIEW (ptpl-draft-round-closed.html)
+     Scoped & Precise 1920x1080 Stage Overlay
+     ========================================================================= */
+  :root {
+    --gold: #f6c90e;
+    --amber: #ffb703;
+    --lime: #c6f03a;
+    --crimson: #ff1e3c;
+    --white: #fff;
+  }
+
+  #roundClosedView {
+    position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; z-index: 6;
+    display: flex; align-items: center; justify-content: center; pointer-events: none;
+  }
+  .rc-backing {
+    position: absolute; left: 0; top: 0; width: 1920px; height: 1080px;
+    background: radial-gradient(ellipse 1100px 560px at 50% 50%, rgba(0,14,6,.55), rgba(0,14,6,0) 72%);
+    opacity: 0;
+  }
+  .rc-panel {
+    position: relative; width: 1380px; height: 880px; box-sizing: border-box; border-radius: 36px; overflow: hidden;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: linear-gradient(180deg, rgba(5,34,16,.80) 0%, rgba(2,22,10,.88) 100%);
+    box-shadow: 0 0 90px rgba(246,201,14,.20), 0 34px 90px rgba(0,0,0,.55);
+    opacity: 0; transform: scale(.9);
+  }
+  .rc-panel::before {
+    content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 5px; pointer-events: none;
+    background: linear-gradient(100deg, var(--gold) 0%, var(--lime) 50%, var(--amber) 100%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude;
+  }
+  .rc-panel::after {
+    content: ""; position: absolute; inset: 5px; border-radius: 31px; pointer-events: none;
+    background:
+      repeating-linear-gradient(0deg,  rgba(198,240,58,.045) 0 1px, transparent 1px 36px),
+      repeating-linear-gradient(90deg, rgba(198,240,58,.045) 0 1px, transparent 1px 36px);
+  }
+  .rc-sweep {
+    position: absolute; top: -10%; bottom: -10%; left: 0; width: 260px; pointer-events: none; z-index: 4;
+    background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.22), rgba(255,255,255,0));
+    transform: translate3d(-400px,0,0) skewX(-18deg); opacity: 0;
+  }
+  .rc-content { position: relative; z-index: 3; display: flex; flex-direction: column; align-items: center; }
+
+  /* top glory badge */
+  .rc-badge { display: flex; align-items: center; gap: 34px; opacity: 0; }
+  #roundClosedBadge {
+    font-family: 'Barlow Condensed', 'Bebas Neue', Impact, sans-serif; font-weight: 700;
+    font-size: 58px; letter-spacing: .207em; line-height: 1; color: var(--gold); white-space: nowrap;
+    text-shadow: 0 0 22px rgba(246,201,14,.75), 0 0 48px rgba(246,201,14,.35), 0 3px 4px rgba(0,0,0,.55);
+  }
+  .rc-badge .ln { display: block; width: 170px; height: 4px; border-radius: 4px; background: linear-gradient(90deg, rgba(246,201,14,0), var(--gold)); box-shadow: 0 0 12px rgba(246,201,14,.8); }
+  .rc-badge .ln.r { background: linear-gradient(90deg, var(--gold), rgba(246,201,14,0)); }
+
+  /* huge round number */
+  .rc-num { position: relative; margin-top: 6px; display: flex; justify-content: center; }
+  .rc-flash {
+    position: absolute; left: 50%; top: 50%; width: 1100px; height: 420px; margin: -210px 0 0 -550px; opacity: 0; pointer-events: none;
+    background: radial-gradient(ellipse at center, rgba(255,226,120,.95) 0%, rgba(246,201,14,.45) 30%, rgba(246,201,14,0) 68%);
+  }
+  .rc-numwrap { position: relative; opacity: 0; }
+  #roundClosedNumber {
+    display: inline-block; white-space: nowrap;
+    font-family: 'Bebas Neue', 'Barlow Condensed', Impact, sans-serif; font-size: 340px; line-height: .98; letter-spacing: .012em;
+    color: transparent; background: linear-gradient(180deg, #ffffff 0%, #ffffff 52%, #ffe38a 100%);
+    -webkit-background-clip: text; background-clip: text;
+    filter: drop-shadow(0 9px 0 rgba(0,0,0,.38)) drop-shadow(0 0 38px rgba(246,201,14,.50));
+  }
+
+  /* category */
+  .rc-cat {
+    margin-top: 2px; opacity: 0; white-space: nowrap; display: flex; align-items: baseline; gap: .3em;
+    font-family: 'Barlow Condensed', 'Bebas Neue', Impact, sans-serif; font-weight: 700; font-size: 88px; letter-spacing: .18em; line-height: 1;
+    text-shadow: 0 4px 6px rgba(0,0,0,.55);
+  }
+  #roundClosedCategory { color: var(--gold); text-shadow: 0 0 26px rgba(246,201,14,.55), 0 4px 6px rgba(0,0,0,.55); }
+  .rc-cat .sfx { color: var(--lime); text-shadow: 0 0 22px rgba(198,240,58,.45), 0 4px 6px rgba(0,0,0,.55); }
+
+  /* CLOSED pill */
+  .rc-pill {
+    position: relative; margin-top: 40px; height: 150px; padding: 0 84px 0 70px; box-sizing: border-box; border-radius: 28px;
+    display: flex; align-items: center; gap: 34px; isolation: isolate;
+    transform: skewX(-12deg); opacity: 0;
+  }
+  .rc-pill .fill { position: absolute; inset: 0; border-radius: inherit; z-index: -1; background: linear-gradient(180deg, #4a0612 0%, #26020a 100%); }
+  .rc-pill::before {
+    content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 5px; z-index: 2; pointer-events: none;
+    background: linear-gradient(100deg, var(--crimson) 0%, var(--amber) 50%, var(--crimson) 100%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude;
+  }
+  .rc-pill::after {
+    content: ""; position: absolute; inset: -6px; border-radius: 34px; z-index: -2; pointer-events: none;
+    background: linear-gradient(100deg, var(--crimson), var(--amber) 50%, var(--crimson));
+    filter: blur(22px); opacity: .45;
+  }
+  .rc-pill .dot { width: 30px; height: 30px; border-radius: 50%; background: var(--crimson); box-shadow: 0 0 18px 4px rgba(255,30,60,.9); flex: none; }
+  #roundClosedStatus {
+    font-family: 'Bebas Neue', 'Barlow Condensed', Impact, sans-serif; font-size: 122px; line-height: 1; letter-spacing: .115em; padding-top: 6px;
+    color: #fff; white-space: nowrap; text-shadow: 0 0 26px rgba(255,30,60,.9), 0 5px 6px rgba(0,0,0,.55);
+  }
+
+  /* summary */
+  #roundClosedSummary {
+    margin-top: 44px; opacity: 0; white-space: nowrap;
+    font-family: 'Barlow Condensed', 'Bebas Neue', Impact, sans-serif; font-weight: 700; font-size: 46px; letter-spacing: .152em; line-height: 1;
+    color: rgba(255,255,255,.93); text-shadow: 0 3px 5px rgba(0,0,0,.6);
+  }
+
+  /* Entry animations (triggered when #roundClosedView gets .play) */
+  #roundClosedView.play .rc-backing { animation: rcFade .8s ease-out forwards; }
+  #roundClosedView.play .rc-panel   { animation: rcPanelIn .75s cubic-bezier(.2,.85,.25,1) forwards; }
+  #roundClosedView.play .rc-badge   { animation: rcDrop .55s ease-out .25s forwards; }
+  #roundClosedView.play .rc-flash   { animation: rcFlash 1s ease-out .45s forwards; }
+  #roundClosedView.play .rc-numwrap { animation: rcSlam .8s cubic-bezier(.2,.9,.3,1) .4s forwards; }
+  #roundClosedView.play .rc-cat     { animation: rcRise .6s ease-out .95s forwards; }
+  #roundClosedView.play .rc-pill    { animation: rcPillIn .65s cubic-bezier(.2,.9,.3,1) 1.2s forwards; }
+  #roundClosedView.play .rc-pill::after { animation: rcPulse 1.9s ease-in-out 1.95s infinite; }
+  #roundClosedView.play .rc-pill .dot   { animation: rcDot 1.9s ease-in-out 1.95s infinite; }
+  #roundClosedView.play #roundClosedSummary { animation: rcFade .7s ease-out 1.65s forwards; }
+  #roundClosedView.play .rc-sweep   { animation: rcSweep 1.3s ease-in-out 1.25s forwards; }
+
+  @keyframes rcFade    { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes rcPanelIn { from { opacity: 0; transform: scale(.9); } to { opacity: 1; transform: scale(1); } }
+  @keyframes rcDrop    { from { opacity: 0; transform: translate3d(0,-34px,0); } to { opacity: 1; transform: translate3d(0,0,0); } }
+  @keyframes rcFlash   { 0% { opacity: 0; transform: scale(.55); } 35% { opacity: .9; } 100% { opacity: 0; transform: scale(1.5); } }
+  @keyframes rcSlam    { 0% { opacity: 0; transform: scale(1.55); } 55% { opacity: 1; transform: scale(.965); } 100% { opacity: 1; transform: scale(1); } }
+  @keyframes rcRise    { from { opacity: 0; transform: translate3d(0,26px,0); } to { opacity: 1; transform: translate3d(0,0,0); } }
+  @keyframes rcPillIn  { 0% { opacity: 0; transform: skewX(-12deg) scale(.5); } 70% { opacity: 1; transform: skewX(-12deg) scale(1.07); } 100% { opacity: 1; transform: skewX(-12deg) scale(1); } }
+  @keyframes rcPulse   { 0%,100% { opacity: .35; } 50% { opacity: .95; } }
+  @keyframes rcDot     { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+  @keyframes rcSweep   { 0% { opacity: 1; transform: translate3d(-400px,0,0) skewX(-18deg); } 100% { opacity: 1; transform: translate3d(1700px,0,0) skewX(-18deg); } }
 </style>
 @vite(['resources/js/app.js'])
 </head>
@@ -447,6 +748,12 @@
 
   <button type="button" class="ctrl-btn" id="modeToggleBtn" onclick="toggleViewMode()" title="Switch Screen Mode">
     ⇋ Toggle View
+  </button>
+  <button type="button" class="ctrl-btn" id="playerCardBtn" onclick="switchToPlayerCardExplicitly()" title="Show Player Details">
+    ★ Player Details
+  </button>
+  <button type="button" class="ctrl-btn" id="roundClosedBtn" onclick="switchToRoundClosedExplicitly()" title="Show Round Closed">
+    ■ Round Closed
   </button>
 
   @if(($availableLeagues ?? collect())->count() > 1)
@@ -479,6 +786,27 @@
 
   <!-- Rotating Neon Star (Only visible during Card View, strictly hidden in Countdown View) -->
   <svg id="starSvg" viewBox="-750 -750 1500 1500" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <!-- Circular clip path for team logo in star center -->
+      <clipPath id="starTeamLogoClip">
+        <circle cx="0" cy="0" r="148"/>
+      </clipPath>
+      <!-- Radial gradient for center medallion background -->
+      <radialGradient id="starMedallionGrad" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#0e3a1d" stop-opacity="0.96"/>
+        <stop offset="70%" stop-color="#082211" stop-opacity="0.98"/>
+        <stop offset="100%" stop-color="#031007" stop-opacity="1"/>
+      </radialGradient>
+      <!-- Ring glow effect -->
+      <filter id="starRingGlow" x="-35%" y="-35%" width="170%" height="170%">
+        <feGaussianBlur stdDeviation="8" result="blur"/>
+        <feMerge>
+          <feMergeNode in="blur"/>
+          <feMergeNode in="SourceGraphic"/>
+        </feMerge>
+      </filter>
+    </defs>
+
     <g id="starRot">
       <polygon id="gapStar" fill="rgba(6,44,18,.55)"/>
       <g class="glow-yellow">
@@ -487,6 +815,35 @@
       <polygon id="innStar" fill="#1c7034"/>
       <polygon id="redStar" fill="none" stroke="#e5112e" stroke-width="15" stroke-linejoin="miter" class="glow-red"/>
       <g id="sticks" class="glow-white" stroke="#fff" stroke-linecap="round" fill="none"></g>
+
+      <!-- Center Team Logo Medallion (Centered in Star at 0, 0) -->
+      <g id="starTeamLogoGroup">
+        <!-- Medallion backdrop and outer gold/lime glowing ring -->
+        <circle cx="0" cy="0" r="162" fill="url(#starMedallionGrad)" stroke="#d2ee45" stroke-width="6" filter="url(#starRingGlow)"/>
+        <!-- Accent inner ring with dashed styling -->
+        <circle cx="0" cy="0" r="152" fill="none" stroke="rgba(255,255,255,0.45)" stroke-width="2.5" stroke-dasharray="8 6"/>
+        <!-- Inner glow rim -->
+        <circle cx="0" cy="0" r="148" fill="none" stroke="#1c7034" stroke-width="3"/>
+        <!-- Team Logo Image -->
+        <image id="starTeamLogoImg"
+               href="{{ $initialPick['teamLogoUrl'] ?? '' }}"
+               x="-135" y="-135" width="270" height="270"
+               preserveAspectRatio="xMidYMid meet"
+               clip-path="url(#starTeamLogoClip)"
+               style="{{ !empty($initialPick['teamLogoUrl']) ? '' : 'display: none;' }}"/>
+        <!-- Fallback team name / initials when logo image is not set -->
+        <text id="starTeamLogoFallback"
+              x="0" y="16"
+              text-anchor="middle"
+              fill="#ffffff"
+              font-family="'Barlow Condensed', 'Bebas Neue', sans-serif"
+              font-weight="700"
+              font-size="44"
+              letter-spacing="2"
+              style="{{ !empty($initialPick['teamLogoUrl']) ? 'display: none;' : '' }}">
+          {{ strtoupper(substr($initialPick['teamName'] ?? 'KTPL', 0, 12)) }}
+        </text>
+      </g>
     </g>
   </svg>
 
@@ -512,6 +869,14 @@
           </div>
         </div>
         <div id="digits">00:00</div>
+
+        <!-- Skipped Turn Card: Replaces countdown display at expired turn -->
+        <div id="skippedTurnBox" class="skipped-turn-card" style="display: none;">
+          <div class="skipped-badge-glory">SKIPPED</div>
+          <div class="skipped-team-name" id="skippedTeamName">—</div>
+          <div class="skipped-meta-line" id="skippedMetaInfo">ROUND 1 | PICK 1</div>
+          <div class="skipped-full-summary" id="skippedFullSummary">— | ROUND 1 | PICK 1 SKIPPED</div>
+        </div>
       </div>
     </div>
   </div>
@@ -615,6 +980,47 @@
       <div class="flare f2" style="left:770px;top:674px"></div>
     </div>
   </div>
+
+  <!-- =======================================================================
+       3. SKIPPED VIEW (State C)
+       Active when turn countdown expires without a pick until admin clicks SHOW TIMER
+       ======================================================================= -->
+  <div id="skippedView" class="view-mode is-hidden">
+    <div class="skipped-screen-backdrop"></div>
+    <div class="skipped-screen-container">
+      <div class="skipped-badge-glory">SKIPPED</div>
+      <div class="skipped-team-name" id="skippedScreenTeamName">
+        {{ strtoupper($latestSkip['teamName'] ?? ($activeRoundData['currentTeamName'] ?? 'KARACHI KIDZ')) }}
+      </div>
+      <div class="skipped-meta-line" id="skippedScreenMetaInfo">
+        ROUND {{ $latestSkip['roundNumber'] ?? ($activeRoundData['roundNumber'] ?? 1) }} | PICK {{ $latestSkip['pickNumber'] ?? ($activeRoundData['currentPickNumber'] ?? 1) }}
+      </div>
+      <div class="skipped-full-summary" id="skippedScreenFullSummary">
+        {{ strtoupper($latestSkip['teamName'] ?? ($activeRoundData['currentTeamName'] ?? 'KARACHI KIDZ')) }} | ROUND {{ $latestSkip['roundNumber'] ?? ($activeRoundData['roundNumber'] ?? 1) }} | PICK {{ $latestSkip['pickNumber'] ?? ($activeRoundData['currentPickNumber'] ?? 1) }} SKIPPED
+      </div>
+      <div class="skipped-waiting-status">
+        <span class="skipped-pulsing-dot"></span> WAITING FOR ADMIN TO SHOW NEXT TIMER
+      </div>
+    </div>
+  </div>
+
+  <!-- =======================================================================
+       4. ROUND CLOSED VIEW (ptpl-draft-round-closed.html)
+       Active when round completes or when triggered by admin
+       ======================================================================= -->
+  <div id="roundClosedView" class="view-mode is-hidden">
+    <div class="rc-backing"></div>
+    <div class="rc-panel">
+      <div class="rc-sweep"></div>
+      <div class="rc-content">
+        <div class="rc-badge"><i class="ln"></i><span id="roundClosedBadge">&#9733; ROUND CONCLUDED &#9733;</span><i class="ln r"></i></div>
+        <div class="rc-num"><div class="rc-flash"></div><div class="rc-numwrap"><span id="roundClosedNumber">ROUND #{{ $activeRoundData['roundNumber'] ?? 1 }}</span></div></div>
+        <div class="rc-cat"><span id="roundClosedCategory">{{ strtoupper($activeRoundData['categoryName'] ?? 'PLATINUM') }}</span><span class="sfx">CATEGORY</span></div>
+        <div class="rc-pill"><i class="fill"></i><span class="dot"></span><span id="roundClosedStatus">CLOSED</span></div>
+        <div id="roundClosedSummary">ALL PICKS COMPLETED &bull; PREPARING NEXT ROUND</div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -622,6 +1028,7 @@
   /* ================= Server Initial State ================= */
   var initialPick = @json($initialPick);
   var initialRound = @json($activeRoundData);
+  var initialSkip = @json($latestSkip);
   var currentLeagueType = @json($leagueType);
   var currentPickId = initialPick ? (parseInt(initialPick.pickId, 10) || 0) : 0;
   var pickTransitionCount = 0;
@@ -629,6 +1036,7 @@
   var currentTurnKey = null;
   var latestRoundData = initialRound;
   var latestPickData = initialPick;
+  var latestSkipData = initialSkip;
   var showingPickedCard = false;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -775,6 +1183,11 @@
     var rot = P.rot0 + P.rotSpeed * t;
     starSvg.style.transform = 'translate3d(' + dx.toFixed(2) + 'px,' + dy.toFixed(2) + 'px,0) rotate(' + rot.toFixed(3) + 'deg) scale(' + sc.toFixed(4) + ')';
 
+    var starLogoGroup = $('starTeamLogoGroup');
+    if (starLogoGroup) {
+      starLogoGroup.setAttribute('transform', 'rotate(' + (-rot).toFixed(3) + ')');
+    }
+
     // Texture drift
     texF.style.transform = 'translate3d(' + ((P.texVX * t) % 512).toFixed(1) + 'px,0,0)';
     texB.style.transform = 'translate3d(' + ((P.texVX * 0.6 * t) % 1024).toFixed(1) + 'px,0,0)';
@@ -851,6 +1264,9 @@
     }
     function draw(force) {
       var sec = Math.ceil(curMs() / 1000);
+      var isHeartbeat = running && sec > 0 && sec <= 10;
+      elDigits.classList.toggle('timer-heartbeat', isHeartbeat);
+
       if (!force && sec === lastShown) return;
       var changed = sec !== lastShown;
       lastShown = sec;
@@ -887,6 +1303,7 @@
       serverDeadline = null;
       running = false;
       finished = false;
+      elDigits.classList.remove('timer-heartbeat');
       draw(true);
       if (autostart) api.start();
     };
@@ -908,6 +1325,7 @@
       remainingMs = curMs();
       serverDeadline = null;
       running = false;
+      elDigits.classList.remove('timer-heartbeat');
       draw(true);
     };
     api.reset = function (autostart) {
@@ -921,6 +1339,7 @@
       } else {
         running = false;
       }
+      elDigits.classList.remove('timer-heartbeat');
       draw(true);
     };
     api.setRemaining = function (sec) {
@@ -995,6 +1414,7 @@
   /* ================= View Modes & Transitions ================= */
   var countdownView = $('countdownView');
   var cardView = $('cardView');
+  var skippedView = $('skippedView');
 
   function updateCountdownHeader(roundData) {
     if (!roundData) return;
@@ -1023,17 +1443,40 @@
   function showCountdownView() {
     currentMode = 'countdown';
 
+    if (roundClosedAutoShiftTimer) {
+      clearTimeout(roundClosedAutoShiftTimer);
+      roundClosedAutoShiftTimer = null;
+    }
+
     stage.classList.remove('mode-card');
+    stage.classList.remove('mode-skipped');
+    stage.classList.remove('mode-round-closed');
     stage.classList.add('mode-countdown');
     var star = $('starSvg');
     if (star) star.style.display = 'none';
 
-    cardView.classList.remove('is-active');
-    cardView.classList.add('is-hidden');
+    var sv = $('skippedView');
+    if (sv) {
+      sv.classList.remove('is-active');
+      sv.classList.add('is-hidden');
+    }
 
-    countdownView.classList.remove('is-hidden');
-    void countdownView.offsetWidth;
-    countdownView.classList.add('is-active');
+    var rcView = $('roundClosedView');
+    if (rcView) {
+      rcView.classList.remove('is-active', 'play');
+      rcView.classList.add('is-hidden');
+    }
+
+    if (cardView) {
+      cardView.classList.remove('is-active');
+      cardView.classList.add('is-hidden');
+    }
+
+    if (countdownView) {
+      countdownView.classList.remove('is-hidden');
+      void countdownView.offsetWidth;
+      countdownView.classList.add('is-active');
+    }
 
     if (latestRoundData) {
       updateCountdownHeader(latestRoundData);
@@ -1043,17 +1486,42 @@
   function showCardView(pickData) {
     currentMode = 'card';
 
+    if (roundClosedAutoShiftTimer) {
+      clearTimeout(roundClosedAutoShiftTimer);
+      roundClosedAutoShiftTimer = null;
+    }
+
     stage.classList.remove('mode-countdown');
+    stage.classList.remove('mode-skipped');
+    stage.classList.remove('mode-round-closed');
     stage.classList.add('mode-card');
     var star = $('starSvg');
     if (star) star.style.display = 'block';
 
-    countdownView.classList.remove('is-active');
-    countdownView.classList.add('is-hidden');
+    var sv = $('skippedView');
+    if (sv) {
+      sv.classList.remove('is-active');
+      sv.classList.add('is-hidden');
+    }
 
-    cardView.classList.remove('is-hidden');
-    void cardView.offsetWidth;
-    cardView.classList.add('is-active');
+    var rcView = $('roundClosedView');
+    if (rcView) {
+      rcView.classList.remove('is-active', 'play');
+      rcView.classList.add('is-hidden');
+    }
+
+    if (countdownView) {
+      countdownView.classList.remove('is-active');
+      countdownView.classList.add('is-hidden');
+    }
+    var digEl = $('digits');
+    if (digEl) digEl.classList.remove('timer-heartbeat');
+
+    if (cardView) {
+      cardView.classList.remove('is-hidden');
+      void cardView.offsetWidth;
+      cardView.classList.add('is-active');
+    }
 
     var pData = pickData || latestPickData;
     if (pData && pData.player) {
@@ -1061,6 +1529,191 @@
     } else {
       var emptyTag = $('emptyStateTag');
       if (emptyTag) emptyTag.style.display = 'flex';
+    }
+  }
+
+  function showSkippedView(skipData) {
+    currentMode = 'skipped';
+    showingPickedCard = false;
+
+    if (roundClosedAutoShiftTimer) {
+      clearTimeout(roundClosedAutoShiftTimer);
+      roundClosedAutoShiftTimer = null;
+    }
+
+    stage.classList.remove('mode-countdown');
+    stage.classList.remove('mode-card');
+    stage.classList.remove('mode-round-closed');
+    stage.classList.add('mode-skipped');
+
+    var star = $('starSvg');
+    if (star) star.style.display = 'none';
+
+    var rcView = $('roundClosedView');
+    if (rcView) {
+      rcView.classList.remove('is-active', 'play');
+      rcView.classList.add('is-hidden');
+    }
+
+    if (countdownView) {
+      countdownView.classList.remove('is-active');
+      countdownView.classList.add('is-hidden');
+    }
+    var digEl = $('digits');
+    if (digEl) digEl.classList.remove('timer-heartbeat');
+
+    if (cardView) {
+      cardView.classList.remove('is-active');
+      cardView.classList.add('is-hidden');
+    }
+
+    var sv = $('skippedView');
+    if (sv) {
+      sv.classList.remove('is-hidden');
+      void sv.offsetWidth;
+      sv.classList.add('is-active');
+    }
+
+    DraftTimer.pause();
+
+    var sData = skipData || latestSkipData;
+    if (sData) {
+      latestSkipData = sData;
+      var tName = (sData.teamName || 'UNKNOWN TEAM').toUpperCase();
+      var rNum = sData.roundNumber || 1;
+      var pNum = sData.pickNumber || 1;
+      if ($('skippedScreenTeamName')) $('skippedScreenTeamName').textContent = tName;
+      if ($('skippedScreenMetaInfo')) $('skippedScreenMetaInfo').textContent = 'ROUND ' + rNum + ' | PICK ' + pNum;
+      if ($('skippedScreenFullSummary')) $('skippedScreenFullSummary').textContent = tName + ' | ROUND ' + rNum + ' | PICK ' + pNum + ' SKIPPED';
+    }
+  }
+
+  /* ================= Round Closed Controller ================= */
+  var RoundClosed = (function () {
+    var view = $('roundClosedView'), elNum = $('roundClosedNumber'), elCat = $('roundClosedCategory'),
+        elSt = $('roundClosedStatus'), elSum = $('roundClosedSummary'), elBadge = $('roundClosedBadge');
+    var api = {}, base = {};
+
+    function up(x) { return String(x == null ? '' : x).toUpperCase().trim(); }
+
+    function fitOne(el, maxW) {
+      if (!el) return;
+      if (!base[el.id]) base[el.id] = parseFloat(getComputedStyle(el).fontSize) || 100;
+      el.style.fontSize = base[el.id] + 'px';
+      var w = el.scrollWidth || el.offsetWidth;
+      if (w > maxW) el.style.fontSize = Math.max(24, base[el.id] * maxW / w).toFixed(1) + 'px';
+    }
+
+    api.fit = function () {
+      fitOne(elNum, 1240);
+      fitOne(elSt, 760);
+      fitOne(elSum, 1240);
+      fitOne(elBadge, 900);
+      if (elCat && elCat.parentNode) {
+        var row = elCat.parentNode;
+        if (!base.cat) base.cat = parseFloat(getComputedStyle(row).fontSize) || 88;
+        row.style.fontSize = base.cat + 'px';
+        var w = row.scrollWidth;
+        if (w > 1240) row.style.fontSize = Math.max(28, base.cat * 1240 / w).toFixed(1) + 'px';
+      }
+    };
+
+    api.set = function (d) {
+      d = d || {};
+      if (d.number != null && elNum) elNum.textContent = up(d.number);
+      else if (d.round != null && elNum) elNum.textContent = 'ROUND #' + up(d.round).replace(/^ROUND\s*/, '').replace(/^#/, '');
+      if (d.category != null && elCat) elCat.textContent = up(d.category).replace(/\s*CATEGORY$/, '');
+      if (d.status != null && elSt) elSt.textContent = up(d.status);
+      if (d.summary != null && elSum) elSum.textContent = up(d.summary);
+      if (d.badge != null && elBadge) elBadge.textContent = up(d.badge);
+      api.fit();
+    };
+
+    api.show = function () {
+      var v = $('roundClosedView');
+      if (!v) return;
+      v.style.transition = 'none';
+      v.style.opacity = '1';
+      v.classList.remove('play');
+      void v.offsetWidth;
+      v.classList.add('play');
+    };
+    api.replay = api.show;
+    api.hide = function () {
+      var v = $('roundClosedView');
+      if (!v) return;
+      v.style.transition = 'opacity .45s ease-in';
+      v.style.opacity = '0';
+    };
+
+    return api;
+  })();
+
+  var roundClosedAutoShiftTimer = null;
+
+  function showRoundClosedView(roundData, options) {
+    currentMode = 'round-closed';
+    options = options || {};
+
+    if (roundClosedAutoShiftTimer) {
+      clearTimeout(roundClosedAutoShiftTimer);
+      roundClosedAutoShiftTimer = null;
+    }
+
+    stage.classList.remove('mode-countdown');
+    stage.classList.remove('mode-card');
+    stage.classList.remove('mode-skipped');
+    stage.classList.add('mode-round-closed');
+
+    var star = $('starSvg');
+    if (star) star.style.display = 'none';
+
+    if (countdownView) {
+      countdownView.classList.remove('is-active');
+      countdownView.classList.add('is-hidden');
+    }
+    var digEl = $('digits');
+    if (digEl) digEl.classList.remove('timer-heartbeat');
+
+    if (cardView) {
+      cardView.classList.remove('is-active');
+      cardView.classList.add('is-hidden');
+    }
+
+    var sv = $('skippedView');
+    if (sv) {
+      sv.classList.remove('is-active');
+      sv.classList.add('is-hidden');
+    }
+
+    var rcView = $('roundClosedView');
+    if (rcView) {
+      rcView.classList.remove('is-hidden');
+      void rcView.offsetWidth;
+      rcView.classList.add('is-active');
+    }
+
+    DraftTimer.pause();
+
+    var rData = roundData || latestRoundData || {};
+    var rNum = rData.roundNumber || rData.roundId || (latestPickData && latestPickData.roundNumber) || 1;
+    var cat = rData.categoryName || (latestPickData && latestPickData.player && latestPickData.player.category) || 'DRAFT';
+
+    RoundClosed.set({
+      round: rNum,
+      category: cat,
+      status: 'CLOSED',
+      summary: 'ALL PICKS COMPLETED • PREPARING NEXT ROUND',
+      badge: '★ ROUND CONCLUDED ★'
+    });
+    RoundClosed.show();
+
+    // Automatically transition to the confirmed player card view after 5 seconds if not explicitly disabled
+    if (!options.noAutoShift) {
+      roundClosedAutoShiftTimer = setTimeout(function () {
+        console.log('[DraftingScreen] Auto-transitioning from Round Closed to Player Details...');
+        showCardView(latestPickData);
+      }, 5000);
     }
   }
 
@@ -1119,22 +1772,18 @@
     } else {
       var timerState = DraftTimer.getState();
       if (isPaused) {
-        // Explicitly paused on server
         DraftTimer.pause();
         if (remainingSec !== null && remainingSec !== undefined) {
           DraftTimer.setRemaining(remainingSec);
         }
       } else {
-        // Active/running state
         if (!timerState.running) {
-          // Transition: was paused, now resuming!
           if (remainingSec > 0) {
             DraftTimer.setRemaining(remainingSec);
           }
           DraftTimer.start(serverDeadline);
         } else if (serverDeadline) {
           if (options.source === 'poll') {
-            // Polling source cannot overwrite healthy running countdown unless drift is massive (> 5s)
             var curRem = timerState.remaining;
             if (Math.abs(curRem - remainingSec) > 5) {
               DraftTimer.start(serverDeadline);
@@ -1156,9 +1805,21 @@
     showCardView(latestPickData);
   }
 
-  // When timer finishes (hits 0), freeze at 00:00 until a pick is made or round completes
+  // When timer finishes (hits 0), immediately transition to State C (SKIPPED screen)
   DraftTimer.onFinish = function () {
     console.log('[DraftingScreen] Countdown timer finished at 00:00.');
+    DraftTimer.pause();
+    if (latestRoundData) {
+      var teamName = latestRoundData.currentTeamName || 'ACTIVE TEAM';
+      var rNum = latestRoundData.roundNumber || latestRoundData.roundId || 1;
+      var pNum = latestRoundData.currentPickNumber || 1;
+      showSkippedView({
+        teamName: teamName,
+        roundNumber: rNum,
+        pickNumber: pNum
+      });
+    }
+    fetchLatestAuthoritativePick();
   };
 
   /* ================= Player Card Update & Alternating Transitions ================= */
@@ -1175,6 +1836,14 @@
       var placeholder = $('playerPhotoPlaceholder');
       if (photoImg) photoImg.style.display = 'none';
       if (placeholder) placeholder.style.display = 'flex';
+
+      var starLogoImg = $('starTeamLogoImg');
+      var starLogoFallback = $('starTeamLogoFallback');
+      if (starLogoImg) starLogoImg.style.display = 'none';
+      if (starLogoFallback) {
+        starLogoFallback.textContent = 'KTPL';
+        starLogoFallback.style.display = 'block';
+      }
       return;
     }
 
@@ -1183,6 +1852,31 @@
 
     // Team name
     $('playerTeam').textContent = data.teamName || '—';
+
+    // Team Logo in Star Center
+    var starLogoImg = $('starTeamLogoImg');
+    var starLogoFallback = $('starTeamLogoFallback');
+    var tName = (data.teamName && data.teamName.trim()) ? data.teamName : 'KTPL';
+    var logoUrl = data.teamLogoUrl || (data.team && data.team.logoUrl) || null;
+
+    if (logoUrl) {
+      if (starLogoImg) {
+        starLogoImg.setAttribute('href', logoUrl);
+        starLogoImg.style.display = 'block';
+      }
+      if (starLogoFallback) {
+        starLogoFallback.style.display = 'none';
+      }
+    } else {
+      if (starLogoImg) {
+        starLogoImg.style.display = 'none';
+        starLogoImg.setAttribute('href', '');
+      }
+      if (starLogoFallback) {
+        starLogoFallback.textContent = tName.length > 12 ? tName.substring(0, 10).toUpperCase() + '…' : tName.toUpperCase();
+        starLogoFallback.style.display = 'block';
+      }
+    }
 
     // Nickname
     $('playerNick').textContent = (p.nickName && p.nickName.trim()) ? p.nickName.toUpperCase() : '—';
@@ -1279,8 +1973,16 @@
 
   /* ================= Initial View State Initialization ================= */
   if (initialRound && initialRound.status === 'active') {
-    // If active round is paused and an initial pick is present, show player card
-    if (initialRound.isPaused && initialPick && initialPick.player) {
+    // If active round is waiting for admin after a skipped turn:
+    if (initialRound.isWaitingForAdmin) {
+      var sInit = initialSkip || {
+        teamName: initialRound.currentTeamName,
+        roundNumber: initialRound.roundNumber,
+        pickNumber: initialRound.currentPickNumber
+      };
+      showSkippedView(sInit);
+    } else if (initialRound.isPaused && initialPick && initialPick.player && !initialSkip) {
+      // If active round is paused and an initial pick is present without an active skip, show player card
       showingPickedCard = true;
       switchToCardView(initialPick);
     } else {
@@ -1327,6 +2029,20 @@
     channelNames.forEach(function (cName) {
       console.log('[DraftingScreen] Subscribing to channel:', cName);
       var channel = window.Echo.channel(cName);
+
+      // 0. Screen actions (Remote Control from Admin Panel)
+      channel.listen('.draft.screen.action', function (data) {
+        console.log('[DraftingScreen] .draft.screen.action event received on ' + cName + ':', data);
+        handleScreenAction(data);
+      });
+      channel.listen('draft.screen.action', function (data) {
+        console.log('[DraftingScreen] draft.screen.action event received on ' + cName + ':', data);
+        handleScreenAction(data);
+      });
+      channel.listen('DraftScreenAction', function (data) {
+        console.log('[DraftingScreen] DraftScreenAction event received on ' + cName + ':', data);
+        handleScreenAction(data);
+      });
 
       // 1. Turn changed / countdown updated
       channel.listen('.draft.turn.changed', function (data) {
@@ -1410,7 +2126,8 @@
     var rem = (data.remainingTurnSeconds !== undefined && data.remainingTurnSeconds !== null)
       ? data.remainingTurnSeconds
       : (data.remainingSeconds !== undefined && data.remainingSeconds !== null ? data.remainingSeconds : '');
-    var sig = [rId, pNum, tId, data.status, isP, rem, data.message || ''].join(':');
+    var isWait = Boolean(data.isWaitingForAdmin);
+    var sig = [rId, pNum, tId, data.status, isP, rem, isWait, data.message || ''].join(':');
     var now = Date.now();
     if (sig === lastHandledTurnSig && (now - lastHandledTurnTime < 400)) {
       // Duplicate event within 400ms across duplicate channels/listeners
@@ -1425,17 +2142,36 @@
     var isReset = Boolean(data.forceReset) ||
       (typeof data.message === 'string' && data.message.toLowerCase().includes('reset'));
 
-    // If round completed, switch to Card View showing the latest pick!
+    // If round completed, show Round Closed screen first, then auto-shift to player card!
     if (data.status === 'completed') {
       DraftTimer.pause();
       showingPickedCard = true;
-      showCardView();
+      showRoundClosedView(data);
       return;
     }
 
-    // Active round in progress (running, paused, or reset)
+    // 1. Check if turn expired and round is waiting for admin (State C: SKIPPED screen)
+    if (data.isWaitingForAdmin || data.state === 'skipped_waiting_for_admin') {
+      DraftTimer.pause();
+      var sInfo = data.skippedPick || data.latestSkip || {
+        teamName: data.currentTeamName,
+        roundNumber: data.roundNumber,
+        pickNumber: data.currentPickNumber
+      };
+      showSkippedView(sInfo);
+      return;
+    }
+
+    // 2. Active round in progress (running, paused, or reset)
     if (data.status === 'active') {
       var isPaused = Boolean(data.isPaused);
+
+      // If we were showing SKIPPED screen and admin clicked SHOW TIMER:
+      if (currentMode === 'skipped') {
+        showingPickedCard = false;
+        switchToCountdownView(data, { source: 'broadcast', forceReset: true });
+        return;
+      }
 
       // If we are currently displaying a freshly confirmed player pick:
       if (showingPickedCard && !isReset) {
@@ -1488,7 +2224,26 @@
         }
       }
 
-      // Handle newer pick
+      if (data.latestSkip) {
+        latestSkipData = data.latestSkip;
+      }
+
+      // 1. If active round is currently waiting for admin after a skipped turn:
+      if (data.activeRound && data.activeRound.status === 'active' && data.activeRound.isWaitingForAdmin) {
+        var arWait = data.activeRound;
+        latestRoundData = arWait;
+        if (data.pickId) {
+          currentPickId = Math.max(currentPickId, parseInt(data.pickId, 10) || 0);
+        }
+        showSkippedView(data.latestSkip || {
+          teamName: arWait.currentTeamName,
+          roundNumber: arWait.roundNumber,
+          pickNumber: arWait.currentPickNumber
+        });
+        return;
+      }
+
+      // 2. Handle newer pick
       if (data.pickId && data.pickId > currentPickId) {
         console.log('[DraftingScreen] Recovered newer pick from server:', data.pickId);
         onNewPlayerPicked(data);
@@ -1505,6 +2260,13 @@
           }
         }
         latestRoundData = ar;
+
+        // If we were showing skipped screen but round is no longer waiting for admin (admin clicked SHOW TIMER):
+        if (currentMode === 'skipped' && !ar.isWaitingForAdmin) {
+          showingPickedCard = false;
+          switchToCountdownView(ar, { source: 'poll', forceReset: true });
+          return;
+        }
 
         if (showingPickedCard) {
           if (!ar.isPaused) {
@@ -1543,7 +2305,7 @@
     if (!isConnected) {
       fetchLatestAuthoritativePick();
     }
-  }, 5000);
+  }, 2000);
 
   setInterval(function () {
     var isConnected = window.Echo && window.Echo.connector && window.Echo.connector.pusher &&
@@ -1589,27 +2351,61 @@
     }
   });
 
+  function handleScreenAction(data) {
+    if (!data || !data.action) return;
+    if (data.action === 'show_player_card') {
+      if (roundClosedAutoShiftTimer) {
+        clearTimeout(roundClosedAutoShiftTimer);
+        roundClosedAutoShiftTimer = null;
+      }
+      showCardView(latestPickData);
+    } else if (data.action === 'show_round_closed') {
+      showRoundClosedView(data.payload || latestRoundData, { noAutoShift: false });
+    } else if (data.action === 'toggle_view') {
+      toggleViewMode();
+    }
+  }
+
   /* Expose helpers for testing & fullscreen */
   window.__draftingScreen = {
     getCurrentPickId: function () { return currentPickId; },
     getMode: function () { return currentMode; },
     showCountdownView: showCountdownView,
     showCardView: showCardView,
+    showSkippedView: showSkippedView,
+    showRoundClosedView: showRoundClosedView,
     switchToCountdown: switchToCountdownView,
     switchToCard: switchToCardView,
     onNewPlayerPicked: onNewPlayerPicked,
     handleTurnChanged: handleTurnChanged,
-    fetchLatest: fetchLatestAuthoritativePick
+    handleScreenAction: handleScreenAction,
+    fetchLatest: fetchLatestAuthoritativePick,
+    RoundClosed: RoundClosed
   };
 })();
 
 function toggleViewMode() {
   if (window.__draftingScreen) {
-    if (window.__draftingScreen.getMode() === 'countdown') {
+    var mode = window.__draftingScreen.getMode();
+    if (mode === 'countdown') {
       window.__draftingScreen.showCardView();
+    } else if (mode === 'card') {
+      window.__draftingScreen.showRoundClosedView();
     } else {
       window.__draftingScreen.showCountdownView();
     }
+  }
+}
+
+function switchToPlayerCardExplicitly() {
+  if (window.__draftingScreen) {
+    window.__draftingScreen.showCardView();
+  }
+}
+
+function switchToRoundClosedExplicitly() {
+  if (window.__draftingScreen) {
+    window.__draftingScreen.showRoundClosedView(null, { noAutoShift: true });
   }
 }
 

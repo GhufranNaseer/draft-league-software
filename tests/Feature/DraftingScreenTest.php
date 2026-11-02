@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Events\DraftPlayerPicked;
+use App\Events\DraftScreenAction;
 use App\Events\DraftTurnChanged;
 use App\Models\Category;
 use App\Models\DraftPick;
@@ -480,5 +481,76 @@ class DraftingScreenTest extends TestCase
         $this->assertArrayHasKey('turnStartedAtMs', $json['activeRound']);
         $this->assertArrayHasKey('serverTimeMs', $json['activeRound']);
         $this->assertArrayHasKey('stateVersion', $json['activeRound']);
+    }
+
+    public function test_drafting_screen_contains_round_closed_elements_and_controller(): void
+    {
+        $admin = $this->createAdminUser();
+        [$round, $teamA] = $this->createDraftSetup();
+
+        $response = $this->actingAs($admin)->get(route('admin.drafting-screen', ['league' => 'male']));
+        $response->assertStatus(200);
+
+        // Verify markup exists
+        $response->assertSee('id="roundClosedView"', false);
+        $response->assertSee('id="roundClosedBadge"', false);
+        $response->assertSee('id="roundClosedNumber"', false);
+        $response->assertSee('id="roundClosedCategory"', false);
+        $response->assertSee('id="roundClosedStatus"', false);
+        $response->assertSee('id="roundClosedSummary"', false);
+
+        // Verify JS controller and actions exist
+        $response->assertSee('showRoundClosedView', false);
+        $response->assertSee('RoundClosed.set', false);
+        $response->assertSee('RoundClosed.show', false);
+        $response->assertSee('switchToPlayerCardExplicitly', false);
+        $response->assertSee('switchToRoundClosedExplicitly', false);
+    }
+
+    public function test_screen_action_endpoint_broadcasts_draft_screen_action_event(): void
+    {
+        Event::fake([DraftScreenAction::class]);
+
+        $admin = $this->createAdminUser();
+        [$round, $teamA] = $this->createDraftSetup();
+
+        // 1. Trigger show_round_closed
+        $response = $this->actingAs($admin)->postJson(route('admin.drafting-screen.action'), [
+            'action' => 'show_round_closed',
+            'league_type' => 'male',
+        ]);
+        $response->assertOk();
+        $response->assertJson(['success' => true, 'action' => 'show_round_closed']);
+
+        Event::assertDispatched(DraftScreenAction::class, function ($event) {
+            return $event->action === 'show_round_closed' &&
+                   $event->leagueType === 'male' &&
+                   isset($event->payload['roundNumber']) &&
+                   isset($event->payload['categoryName']);
+        });
+
+        // 2. Trigger show_player_card
+        $response2 = $this->actingAs($admin)->postJson(route('admin.drafting-screen.action'), [
+            'action' => 'show_player_card',
+            'league_type' => 'male',
+        ]);
+        $response2->assertOk();
+        $response2->assertJson(['success' => true, 'action' => 'show_player_card']);
+
+        Event::assertDispatched(DraftScreenAction::class, function ($event) {
+            return $event->action === 'show_player_card' && $event->leagueType === 'male';
+        });
+    }
+
+    public function test_draft_turn_changed_broadcast_includes_category_name(): void
+    {
+        $admin = $this->createAdminUser();
+        [$round, $teamA] = $this->createDraftSetup();
+
+        $event = new DraftTurnChanged($round, 'Round completed');
+        $broadcast = $event->broadcastWith();
+
+        $this->assertArrayHasKey('categoryName', $broadcast);
+        $this->assertSame('Platinum Category', $broadcast['categoryName']);
     }
 }
