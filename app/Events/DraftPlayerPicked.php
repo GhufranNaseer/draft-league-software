@@ -38,6 +38,10 @@ class DraftPlayerPicked implements ShouldBroadcastNow, ShouldDispatchAfterCommit
 
     public int $stateVersion;
 
+    public bool $isRoundCompleted = false;
+
+    public ?array $roundData = null;
+
     public function __construct(DraftPick $pick)
     {
         $now = now();
@@ -79,6 +83,16 @@ class DraftPlayerPicked implements ShouldBroadcastNow, ShouldDispatchAfterCommit
             'city' => $participant?->city ?: '—',
             'passportPictureUrl' => $passportUrl,
         ];
+
+        $this->isRoundCompleted = ($pick->round?->status === 'completed');
+        if ($this->isRoundCompleted) {
+            $this->roundData = [
+                'id' => (int) $pick->round->id,
+                'roundNumber' => (int) ($pick->round->round_number ?: $pick->round->id),
+                'status' => 'completed',
+                'categoryName' => $pick->round->category?->name ?? 'DRAFT',
+            ];
+        }
     }
 
     public function broadcastOn(): array
@@ -97,7 +111,7 @@ class DraftPlayerPicked implements ShouldBroadcastNow, ShouldDispatchAfterCommit
             'stateVersion' => $this->stateVersion,
         ]);
 
-        $channels = [new Channel($channel)];
+        $channels = [new Channel($channel), new Channel('draft.screen')];
         if ($this->leagueType === 'male') {
             $channels[] = new Channel('draft.league.males');
         } elseif ($this->leagueType === 'males') {
@@ -128,6 +142,8 @@ class DraftPlayerPicked implements ShouldBroadcastNow, ShouldDispatchAfterCommit
             'teamName' => $this->teamName,
             'teamLogoUrl' => $this->teamLogoUrl,
             'player' => $this->player,
+            'isRoundCompleted' => $this->isRoundCompleted,
+            'roundData' => $this->roundData,
             'serverTime' => $this->serverTime,
             'serverTimeMs' => $this->serverTimeMs,
             'stateVersion' => $this->stateVersion,
