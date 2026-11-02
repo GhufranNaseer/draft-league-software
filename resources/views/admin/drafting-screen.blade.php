@@ -131,6 +131,14 @@
   #cardView.view-mode.is-active {
     display: block !important;
   }
+  #skippedView.view-mode.is-active {
+    display: flex !important;
+  }
+  #roundClosedView.view-mode.is-active {
+    display: flex !important;
+    opacity: 1 !important;
+    z-index: 100 !important;
+  }
 
   /* =========================================================================
      COUNTDOWN VIEW (ptpl-draft-countdown.html)
@@ -614,7 +622,7 @@
   }
 
   #roundClosedView {
-    position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; z-index: 6;
+    position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; z-index: 100;
     display: flex; align-items: center; justify-content: center; pointer-events: none;
   }
   .rc-backing {
@@ -1315,7 +1323,7 @@
       }
       running = true;
       finished = false;
-      draw(true);
+      draw(false);
     };
     api.resume = api.start;
     api.pause = function () {
@@ -1325,7 +1333,7 @@
       serverDeadline = null;
       running = false;
       elDigits.classList.remove('timer-heartbeat');
-      draw(true);
+      draw(false);
     };
     api.reset = function (autostart) {
       wantStart = false;
@@ -1464,6 +1472,8 @@
     if (rcView) {
       rcView.classList.remove('is-active', 'play');
       rcView.classList.add('is-hidden');
+      rcView.style.display = 'none';
+      rcView.style.opacity = '0';
     }
 
     if (cardView) {
@@ -1507,6 +1517,8 @@
     if (rcView) {
       rcView.classList.remove('is-active', 'play');
       rcView.classList.add('is-hidden');
+      rcView.style.display = 'none';
+      rcView.style.opacity = '0';
     }
 
     if (countdownView) {
@@ -1552,6 +1564,8 @@
     if (rcView) {
       rcView.classList.remove('is-active', 'play');
       rcView.classList.add('is-hidden');
+      rcView.style.display = 'none';
+      rcView.style.opacity = '0';
     }
 
     if (countdownView) {
@@ -1632,10 +1646,13 @@
       var v = $('roundClosedView');
       if (!v) return;
       v.style.transition = 'none';
+      v.style.display = 'flex';
       v.style.opacity = '1';
+      v.style.zIndex = '100';
       v.classList.remove('play');
       void v.offsetWidth;
       v.classList.add('play');
+      api.fit();
     };
     api.replay = api.show;
     api.hide = function () {
@@ -1670,6 +1687,7 @@
     if (countdownView) {
       countdownView.classList.remove('is-active');
       countdownView.classList.add('is-hidden');
+      countdownView.style.display = 'none';
     }
     var digEl = $('digits');
     if (digEl) digEl.classList.remove('timer-heartbeat');
@@ -1677,17 +1695,22 @@
     if (cardView) {
       cardView.classList.remove('is-active');
       cardView.classList.add('is-hidden');
+      cardView.style.display = 'none';
     }
 
     var sv = $('skippedView');
     if (sv) {
       sv.classList.remove('is-active');
       sv.classList.add('is-hidden');
+      sv.style.display = 'none';
     }
 
     var rcView = $('roundClosedView');
     if (rcView) {
       rcView.classList.remove('is-hidden');
+      rcView.style.display = 'flex';
+      rcView.style.opacity = '1';
+      rcView.style.zIndex = '100';
       void rcView.offsetWidth;
       rcView.classList.add('is-active');
     }
@@ -1707,12 +1730,12 @@
     });
     RoundClosed.show();
 
-    // Automatically transition to the confirmed player card view after 5 seconds if not explicitly disabled
+    // Automatically transition to the confirmed player card view after 15 seconds if not explicitly disabled
     if (!options.noAutoShift) {
       roundClosedAutoShiftTimer = setTimeout(function () {
         console.log('[DraftingScreen] Auto-transitioning from Round Closed to Player Details...');
         showCardView(latestPickData);
-      }, 5000);
+      }, 15000);
     }
   }
 
@@ -1772,22 +1795,24 @@
       var timerState = DraftTimer.getState();
       if (isPaused) {
         DraftTimer.pause();
-        if (remainingSec !== null && remainingSec !== undefined) {
+        var curSec = Math.ceil(timerState.remaining);
+        if (remainingSec !== null && remainingSec !== undefined && Math.abs(curSec - remainingSec) > 1) {
           DraftTimer.setRemaining(remainingSec);
         }
       } else {
         if (!timerState.running) {
-          if (remainingSec > 0) {
+          var curSec = Math.ceil(timerState.remaining);
+          if (remainingSec > 0 && Math.abs(curSec - remainingSec) > 1) {
             DraftTimer.setRemaining(remainingSec);
           }
           DraftTimer.start(serverDeadline);
         } else if (serverDeadline) {
+          var curSec = Math.ceil(timerState.remaining);
           if (options.source === 'poll') {
-            var curRem = timerState.remaining;
-            if (Math.abs(curRem - remainingSec) > 5) {
+            if (Math.abs(curSec - remainingSec) > 5) {
               DraftTimer.start(serverDeadline);
             }
-          } else {
+          } else if (Math.abs(curSec - remainingSec) > 1) {
             DraftTimer.start(serverDeadline);
           }
         }
@@ -1954,14 +1979,21 @@
     showingPickedCard = true;
     pickTransitionCount++;
 
+    renderPlayerDOM(pickData);
+
+    // If this pick completed the round:
+    if (pickData.isRoundCompleted || (pickData.roundData && pickData.roundData.status === 'completed')) {
+      console.log('[DraftingScreen] Final round pick confirmed! Triggering Round Closed view first.');
+      showRoundClosedView(pickData.roundData || latestRoundData);
+      return;
+    }
+
+    if (currentMode === 'round-closed') {
+      return;
+    }
+
     // Immediately switch to Card View so the audience sees the picked player with neon star
     showCardView(pickData);
-
-    var isFromLeft = (pickTransitionCount % 2 === 1);
-    var content = $('playerCardContent');
-    var prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-    renderPlayerDOM(pickData);
 
     if (!prefersReducedMotion && content) {
       content.className = isFromLeft ? 'anim-enter-left' : 'anim-enter-right';
@@ -2014,7 +2046,7 @@
       return;
     }
 
-    var channelNames = ['draft.league.' + currentLeagueType];
+    var channelNames = ['draft.screen', 'draft.league.' + currentLeagueType];
     if (currentLeagueType === 'male') {
       channelNames.push('draft.league.males');
     } else if (currentLeagueType === 'males') {
@@ -2024,6 +2056,13 @@
     } else if (currentLeagueType === 'females') {
       channelNames.push('draft.league.female');
     }
+    @if(isset($availableLeagues))
+      @foreach($availableLeagues as $al)
+        if (channelNames.indexOf('draft.league.{{ $al->slug }}') === -1) {
+          channelNames.push('draft.league.{{ $al->slug }}');
+        }
+      @endforeach
+    @endif
 
     channelNames.forEach(function (cName) {
       console.log('[DraftingScreen] Subscribing to channel:', cName);
@@ -2359,7 +2398,7 @@
       }
       showCardView(latestPickData);
     } else if (data.action === 'show_round_closed') {
-      showRoundClosedView(data.payload || latestRoundData, { noAutoShift: false });
+      showRoundClosedView(data.payload || latestRoundData, { noAutoShift: true });
     } else if (data.action === 'toggle_view') {
       toggleViewMode();
     }
