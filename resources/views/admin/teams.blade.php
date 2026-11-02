@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="reverb-key" content="{{ config('broadcasting.connections.reverb.key') }}">
-    <meta name="reverb-host" content="{{ config('broadcasting.connections.reverb.options.host') }}">
-    <meta name="reverb-port" content="{{ config('broadcasting.connections.reverb.options.port') }}">
-    <meta name="reverb-scheme" content="{{ config('broadcasting.connections.reverb.options.scheme') }}">
+    <meta name="reverb-host" content="{{ env('VITE_REVERB_HOST', request()->getHost()) }}">
+    <meta name="reverb-port" content="{{ env('VITE_REVERB_PORT', request()->getPort() ?: (request()->isSecure() ? 443 : 80)) }}">
+    <meta name="reverb-scheme" content="{{ env('VITE_REVERB_SCHEME', request()->isSecure() ? 'https' : 'http') }}">
     <script>
         window.__REVERB_KEY__ = "{{ config('broadcasting.connections.reverb.key') }}";
     </script>
