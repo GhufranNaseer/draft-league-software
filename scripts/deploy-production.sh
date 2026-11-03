@@ -203,9 +203,11 @@ log_success "Laravel caches compiled successfully."
 # ------------------------------------------------------------------------------
 # 9. Background Services & Container Reload
 # ------------------------------------------------------------------------------
-log_info "Synchronizing public images into containers..."
+log_info "Synchronizing public images and assets into containers..."
 docker cp public/images/. "$NGINX_CONTAINER":/var/www/html/public/images/ 2>/dev/null || true
 docker cp public/images/. "$APP_CONTAINER":/var/www/html/public/images/ 2>/dev/null || true
+docker cp public/assets/. "$NGINX_CONTAINER":/var/www/html/public/assets/ 2>/dev/null || true
+docker cp public/assets/. "$APP_CONTAINER":/var/www/html/public/assets/ 2>/dev/null || true
 
 log_info "Restarting background queue and Reverb WebSocket services..."
 docker restart "$QUEUE_CONTAINER"
