@@ -100,6 +100,11 @@ jobs:
             public/images/ \
             $VPS_USER@$VPS_HOST:/var/www/drafting_v2/public/images/
 
+          echo "Syncing public/assets/ to VPS..."
+          rsync -avz -e "ssh -i ~/.ssh/deploy_key -p $VPS_PORT -o StrictHostKeyChecking=yes" \
+            public/assets/ \
+            $VPS_USER@$VPS_HOST:/var/www/drafting_v2/public/assets/
+
           echo "Syncing deployment scripts to VPS..."
           rsync -avz -e "ssh -i ~/.ssh/deploy_key -p $VPS_PORT -o StrictHostKeyChecking=yes" \
             scripts/ \
