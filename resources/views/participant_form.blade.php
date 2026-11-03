@@ -21,7 +21,7 @@
     <div class="container" style="max-width:900px; margin-top:24px;">
         <div class="form-container">
             <div class="form-header">
-                <img src="{{ asset('images/ptpl-banner-transparent.png') }}" alt="Tournament Logo" class="form-logo">
+                <img src="{{ asset('images/registration-header.jpeg') }}" alt="PTPL Player Registration Banner" class="form-logo">
                 <h2>Player Registration</h2>
             </div>
             <div class="form-body">
