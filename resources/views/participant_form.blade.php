@@ -9,7 +9,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
     <link rel="stylesheet" href="{{ asset('assets/css/cropper.min.css') }}">
-    <link rel="stylesheet" href="{{ asset('assets/css/participant-form.css') }}">
+    <link rel="stylesheet" href="{{ asset('assets/css/participant-form.css') }}?v={{ file_exists(public_path('assets/css/participant-form.css')) ? filemtime(public_path('assets/css/participant-form.css')) : '2' }}">
     <link rel="stylesheet" href="{{ asset('assets/css/navbar.css') }}">
 </head>
 
@@ -21,7 +21,7 @@
     <div class="container" style="max-width:900px; margin-top:24px;">
         <div class="form-container">
             <div class="form-header">
-                <img src="{{ asset('images/registration-header.jpeg') }}" alt="PTPL Player Registration Banner" class="form-logo">
+                <img src="{{ asset('images/registration-header.jpeg') }}" alt="PTPL Player Registration Banner" class="form-logo" style="max-width: 872px; width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);">
                 <h2>Player Registration</h2>
             </div>
             <div class="form-body">
